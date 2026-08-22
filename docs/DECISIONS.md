@@ -1013,3 +1013,47 @@ normal one.
 - Verified: the application starts, spawns the worker, closes cleanly, and leaves no orphan.
 - **Not verified:** nobody has processed a video through the window. The engine underneath it has
   round-trip tests; the buttons have been clicked by no one.
+
+---
+
+## D-34 — Looking forward as well as backward is not worth the architecture
+
+**Status:** accepted (2026-08-23) · **Closes:** the look-ahead item that has been open since D-19
+
+### Context
+
+The accumulator carries one estimate forward, and coverage governs the gain (+0.84 dB at depth 0–4,
++2.15 at 20 or more). A frame in the middle of a shot has as much future as past, so a second chain
+running backwards looked like twice the evidence at the same O(1) cost.
+
+The price is architectural: the media layer hands each frame to the encoder as it is produced, and a
+backward chain needs the whole shot in hand before the first frame can be written. D-19 recorded the
+causal window as a deviation from §5.6 and named look-ahead as the correct fix.
+
+### Measured, on three target frames of each clip, at depth 24
+
+| clip | backward alone | both, averaged | difference |
+| --- | ---: | ---: | ---: |
+| screen-anchored | +6.57 dB | +6.62 dB | **+0.05** |
+| object-anchored | +4.31 dB | +4.90 dB | **+0.59** |
+
+**The evidence is not doubled, it is duplicated.** Content that passes through a screen-fixed mosaic
+is seen outside it on both sides — the same pixel, twice, not two different pixels.
+
+And **backward beat forward at every one of the six targets**, so no selection rule can do better
+than the backward chain alone. What the averaging buys on the ladder clip is error cancellation, not
+new information. At one target it is actively worse: 36.24 dB backward against 34.02 averaged, where
+the pan had run out and the forward chain had nothing to work with.
+
+### Decision
+
+The window stays causal. D-19's deviation from §5.6 is no longer a deviation to be corrected — it is
+what the measurement supports.
+
+### Consequences
+
+- The media layer keeps streaming, which is what keeps memory flat and lets the first frame be
+  written immediately.
+- If a future solver makes the two directions carry different information — a learned restorer that
+  weights evidence rather than averaging it — this is worth re-measuring. Nothing here says
+  look-ahead is useless; it says it is worth 0.05 dB to *this* solver.
