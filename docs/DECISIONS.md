@@ -1057,3 +1057,47 @@ what the measurement supports.
 - If a future solver makes the two directions carry different information — a learned restorer that
   weights evidence rather than averaging it — this is worth re-measuring. Nothing here says
   look-ahead is useless; it says it is worth 0.05 dB to *this* solver.
+
+---
+
+## D-35 — The Speed encoder profile is not worth wiring, and the reason is that encoding is 1.4%
+
+**Status:** accepted (2026-08-23) · **Defers:** §5.1.4's NVENC path indefinitely
+
+### Context
+
+PyAV bundles its own FFmpeg without NVENC, so the Speed profile has to shell out to
+`tools/ffmpeg` — which does have `h264_nvenc`, `hevc_nvenc` and `av1_nvenc`. The profile currently
+refuses rather than silently giving the user x265 while the settings say NVENC.
+
+Wiring it means piping restored frames to a subprocess. Doing that **without losing timestamps**
+means a lossless intermediate stream carrying PTS — raw video over a pipe has none, and ffmpeg would
+synthesise them from a frame rate. §5.1.7's guarantee, that every output frame carries its source
+PTS, is the thing the media layer was built around.
+
+### Measured
+
+| stage | ms/frame |
+| --- | ---: |
+| detection | 119 |
+| one alignment | 107 |
+| accumulator | 6 |
+| **decode + encode + mux, x265 `fast` CRF 12** | **9.9** |
+
+On a real job — the screen clip at 1680×800, 96 frames in 70 s — that is **1.4%** of the wall clock,
+and the 9.9 ms includes decoding, so the encode alone is less.
+
+### Decision
+
+Deferred. NVENC could save at most 1.4%, and the price is a lossless intermediate pipe plus the
+central timestamp invariant.
+
+The profile keeps refusing rather than substituting. A user who asks for NVENC and silently gets
+x265 has been told something untrue about their output.
+
+### Consequences
+
+- §5.1.4's premise — that the encoder is where the time goes — is false for this pipeline. It was
+  written before there was a pipeline to measure.
+- If detection and alignment ever drop by an order of magnitude, this is worth re-reading. Until
+  then the two of them are 97% of the cost and the encoder is a rounding error.
