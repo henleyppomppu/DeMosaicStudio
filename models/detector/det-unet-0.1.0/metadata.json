@@ -1,0 +1,41 @@
+{
+  "id": "det-unet",
+  "version": "0.1.0",
+  "task": "mosaic-segmentation",
+  "sha256": "81317042f7477b12f87735ecae32a447aa7df55fea8129ce557a988084e8839a",
+  "architecture": {
+    "type": "MosaicUNet",
+    "width": 32,
+    "parameters": 7762465
+  },
+  "input": {
+    "channels": 1,
+    "range": [
+      0.0,
+      1.0
+    ],
+    "sizeMultiple": 16,
+    "inferenceShortSide": 512,
+    "tile": 512,
+    "tileOverlap": 64
+  },
+  "output": {
+    "channels": 1,
+    "activation": "sigmoid",
+    "semantics": "P(pixel is mosaicked)"
+  },
+  "precision": "fp32",
+  "runtimes": [
+    "pytorch-cuda",
+    "pytorch-cpu"
+  ],
+  "trainedOn": "clean-tos (24 clips, 96 s, Tears of Steel CC BY 3.0), synthetic positives",
+  "training": {
+    "steps": 8000,
+    "report": "docs/phase1-detector-report.md",
+    "valIoU": 0.82,
+    "valFalsePositiveArea": 0.0043
+  },
+  "license": "in-house; no third-party weights (D-03)",
+  "notes": "Experiment-grade. Trained on one film, with JPEG standing in for H.264 recompression and no collected hard negatives. Its false-positive rate is far from prd.md \u00a75.2.5a and it has never been evaluated against real mosaicked footage. Do not treat its output as production quality."
+}

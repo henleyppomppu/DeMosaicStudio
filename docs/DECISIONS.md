@@ -294,3 +294,41 @@ first, unusable number.
 the numbers can be re-derived rather than re-guessed.
 
 **Date:** 2026-08-22.
+
+---
+
+## D-19 — Restoration is ROI-scoped, and the window is causal until look-ahead exists
+
+Two decisions from the first end-to-end run (`docs/phase3-endtoend-report.md`).
+
+### ROI scoping is mandatory, not an optimisation
+
+**Decided.** Every restoration stage — flow, back-projection, blending — works inside a padded ROI
+(`roi.py`, §5.5), never on the full frame.
+
+**Why.** The first attempt ran dense flow and IBP at 1920x800 for a region covering a fraction of
+the frame. It consumed 10.9 GB of VRAM and produced almost nothing in eight minutes. §5.5 reads like
+a quality requirement about padding and reflection; it is also the difference between a pipeline
+that finishes and one that does not.
+
+**Reversal cost: n/a.** There is no version of this worth reversing.
+
+### The window is causal, not centred
+
+**Decided.** The temporal window is the target plus `K-1` **past** frames, not `K//2` on each side.
+
+**Rejected:** taking `K//2` past neighbours, which leaves *one* neighbour at the measured K=3. The
+router's two-neighbour minimum would then make multi-frame unreachable while every log line reported
+a window of 3 — a silent failure, and worse than a documented deviation.
+
+**Why not centred.** §5.6 centres the window, which requires the writer to trail the reader by
+`K//2` frames. This pipeline encodes each frame as it is produced, so future frames do not exist yet.
+
+**Cost, measured elsewhere:** a longer maximum baseline (two frames back rather than one each way),
+and `docs/phase2-alignment-report.md` §3 found shorter baselines align better. So this deviation
+costs quality in the one band where multi-frame works at all.
+
+**Reversal cost: Medium.** Implementing look-ahead means buffering frames in the media layer between
+the transform and the muxer. It is the correct fix and is recorded as a next step rather than done.
+
+**Date:** 2026-08-22.

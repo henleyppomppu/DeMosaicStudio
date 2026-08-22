@@ -33,7 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "worker"))
 
 from data.dataset import load_split, make_batch  # noqa: E402
-from models.unet import (  # noqa: E402
+from demosaic_worker.detect.unet import (  # noqa: E402
     MosaicUNet,
     dice_bce_loss,
     false_positive_area,

@@ -8,4 +8,8 @@ from __future__ import annotations
 
 from .protocol import PROTOCOL_VERSION
 
-__all__ = ["PROTOCOL_VERSION"]
+#: Worker build version, reported at handshake. Independent of the protocol version: the worker can
+#: gain features without the wire format changing, and must be able to say so.
+__version__ = "0.1.0"
+
+__all__ = ["PROTOCOL_VERSION", "__version__"]

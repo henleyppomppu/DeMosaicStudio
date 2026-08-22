@@ -139,3 +139,36 @@ def test_confidence_is_bounded(aligner: DenseAligner) -> None:
 
     assert alignment.confidence.min() >= 0.0
     assert alignment.confidence.max() <= 1.0
+
+
+@pytest.mark.parametrize("size", [24, 48, 96, 127, 128, 200])
+def test_small_regions_are_aligned_rather_than_rejected(aligner: DenseAligner, size: int) -> None:
+    """RAFT needs at least 128 px on each axis; small ROIs are this pipeline's common case.
+
+    Before the aligner padded up, every alignment on a small region raised "feature maps are too
+    small" and the router fell back to single-frame everywhere without anything looking broken.
+    """
+    image = _textured(size, size)
+    alignment = aligner.align(image, image.copy())
+
+    assert alignment.target_to_neighbour.shape == (size, size, 2)
+    assert alignment.confidence.shape == (size, size)
+    assert alignment.usable_fraction > 0.5
+
+
+def test_a_non_square_small_region_is_aligned(aligner: DenseAligner) -> None:
+    image = _textured(40, 150)
+    alignment = aligner.align(image, image.copy())
+
+    assert alignment.target_to_neighbour.shape == (40, 150, 2)
+
+
+def test_a_known_shift_is_recovered_in_a_small_region(aligner: DenseAligner) -> None:
+    """Padding must not destroy the measurement it exists to enable."""
+    image = _textured(64, 64)
+    shifted = np.roll(image, 3, axis=1)
+
+    alignment = aligner.align(image, shifted)
+    interior = alignment.target_to_neighbour[16:-16, 16:-16, 0]
+
+    assert np.median(interior) == pytest.approx(3.0, abs=1.5)

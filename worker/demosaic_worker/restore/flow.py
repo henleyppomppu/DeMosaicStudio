@@ -33,6 +33,14 @@ from torchvision.models.optical_flow import Raft_Small_Weights, raft_small
 #: Forward-backward disagreement, in pixels, above which a pixel is not trusted. §5.7.
 DEFAULT_CONSISTENCY_PX = 1.5
 
+#: RAFT downsamples by 8 and then builds a correlation pyramid over that, so anything smaller than
+#: this on either axis raises "feature maps are too small to be down-sampled".
+#:
+#: **Measured, not read off a spec:** 96x96 fails and 128x128 works. Small ROIs are the common case
+#: for this pipeline, so the padding below is not an edge case — without it every alignment on a
+#: small region fails and the router silently falls back to single-frame everywhere.
+MIN_FLOW_SIZE = 128
+
 
 @dataclass(frozen=True, slots=True)
 class Alignment:
@@ -60,10 +68,22 @@ def _to_rgb_tensor(image: np.ndarray, device: torch.device) -> torch.Tensor:
     return tensor * 2.0 - 1.0
 
 
-def _pad_to_multiple(tensor: torch.Tensor, multiple: int = 8) -> tuple[torch.Tensor, tuple[int, int]]:
+def _pad_for_raft(tensor: torch.Tensor, multiple: int = 8) -> tuple[torch.Tensor, tuple[int, int]]:
+    """Pads up to RAFT's minimum size and to a multiple of its stride.
+
+    Replicate rather than reflect: the padding is scaffolding the flow is computed on and then
+    discarded, and replicating the edge produces zero apparent motion there, which is the least
+    misleading thing to hand a flow estimator.
+    """
     height, width = tensor.shape[-2:]
-    pad_h = (-height) % multiple
-    pad_w = (-width) % multiple
+
+    target_h = max(height, MIN_FLOW_SIZE)
+    target_w = max(width, MIN_FLOW_SIZE)
+    target_h += (-target_h) % multiple
+    target_w += (-target_w) % multiple
+
+    pad_h = target_h - height
+    pad_w = target_w - width
 
     if pad_h or pad_w:
         tensor = F.pad(tensor, (0, pad_w, 0, pad_h), mode="replicate")
@@ -86,8 +106,8 @@ class DenseAligner:
 
     @torch.no_grad()
     def _flow(self, a: np.ndarray, b: np.ndarray) -> np.ndarray:
-        first, size = _pad_to_multiple(_to_rgb_tensor(a, self.device))
-        second, _ = _pad_to_multiple(_to_rgb_tensor(b, self.device))
+        first, size = _pad_for_raft(_to_rgb_tensor(a, self.device))
+        second, _ = _pad_for_raft(_to_rgb_tensor(b, self.device))
 
         # RAFT returns a list of refinement iterations; the last is the estimate.
         flow = self.model(first, second)[-1]

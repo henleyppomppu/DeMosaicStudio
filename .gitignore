@@ -499,3 +499,10 @@ training/datasets/**
 artifacts/
 docs/benchmarks/*.json
 *.pt
+
+# Model weights: reproducible from training/, large, and under D-11 never distributed.
+# The metadata and the index are tracked so provenance survives even though the bytes do not.
+models/**/*.pt
+
+# Job outputs and scratch renders.
+artifacts/

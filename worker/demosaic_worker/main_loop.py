@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from typing import IO, Any
 
 from . import __version__
-from .errors import E7003, E9001, WorkerError
+from .errors import E7003, E7006, E9001, WorkerError
 from .jobs import JobContext, JobRunner
 from .messages import Emitter, Request, parse_request
 from .protocol import PROTOCOL_VERSION, HostMessage, WorkerMessage
@@ -71,7 +71,7 @@ class Worker:
 
             case HostMessage.PREVIEW:
                 result = self.runner.preview(
-                    request.require("jobId"),
+                    request.job_id or "",
                     request.require("sourcePath"),
                     int(request.require("pts")),
                     request.get("settings", {}),
@@ -98,7 +98,11 @@ class Worker:
                 self._running = False
 
     def _start(self, request: Request, *, analyze_only: bool) -> None:
-        job_id = str(request.require("jobId"))
+        # jobId lives in the envelope, not the payload: parse_request lifts it out. Reaching for it
+        # with require() looks right and finds nothing.
+        job_id = request.job_id
+        if not job_id:
+            raise WorkerError(E7006, f"{request.type.value} requires a jobId")
 
         if self.current is not None and not self.current.finished:
             raise WorkerError(E7003, "a job is already running", requested=job_id)

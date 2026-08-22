@@ -6,7 +6,7 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from models.unet import (  # noqa: E402
+from demosaic_worker.detect.unet import (  # noqa: E402
     MosaicUNet,
     dice_bce_loss,
     false_positive_area,

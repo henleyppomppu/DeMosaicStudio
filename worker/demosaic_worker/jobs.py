@@ -1,0 +1,649 @@
+"""Job execution — the pipeline, assembled. prd.md §3.1, §5.13.
+
+This is where the stages become a product. The order below is §18's processing flow, and the two
+invariants it exists to preserve are worth stating before the code:
+
+* **A frame is either fully restored or bit-identical to its source** (§5.8.2). Every failure path
+  degrades to a lower-effort restoration and finally to the untouched frame. There is no partial
+  composite.
+* **The output timeline is the source timeline** (§5.1.7). The restoration stages never see a
+  timestamp; they receive pixels and return pixels, and the media layer carries the PTS through.
+
+The pipeline runs a **sliding window** in presentation order: a frame cannot be restored until its
+neighbours have been decoded, so the writer trails the reader by ``K // 2`` frames. That lag is
+latency, not a stall (§5.6).
+"""
+
+from __future__ import annotations
+
+import json
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+
+from .analyze.estimator import AnchorObservation, estimate_anchor, estimate_geometry
+from .analyze.motion import classify
+from .analyze.profile import GridAnchor, MosaicProfile, band_for
+from .detect.regions import Region, extract_regions
+from .errors import E1001, E3002, E4002, W3101, W4102, W4103, WorkerError
+from .media.probe import probe as probe_media
+from .messages import Emitter
+from .policies import (
+    ConfidenceGate,
+    QualityPreset,
+    RestorationPath,
+    RouteInputs,
+    decide_window,
+    route,
+)
+from .post.blend import TemporalAlpha, blend_region
+from .protocol import Stage
+from .roi import build_roi
+from .restore.ibp import FlowObservation, Observation, block_average, reconstruct, reconstruct_flow
+from .scene.cuts import detect_cuts, same_scene_span
+from .track.tracker import Track, Tracker
+
+REPO = Path(__file__).resolve().parent.parent.parent
+MODELS = REPO / "models"
+
+
+@dataclass(frozen=True, slots=True)
+class TrackOutcome:
+    """What restoring one track on one frame produced.
+
+    Carries the ROI and the profile as well as the pixels: the caller needs the ROI to know where to
+    composite and the profile's block size to set the blender's dilation allowance (§5.11), and
+    threading them back out beats recomputing either.
+    """
+
+    decision: Any
+    restored: np.ndarray | None
+    confidence: float
+    roi: Any
+    profile: MosaicProfile
+
+
+@dataclass
+class JobContext:
+    """One job's request and mutable state. Owned by the dispatch loop (§8.5)."""
+
+    job_id: str
+    source_path: str
+    output_path: str
+    settings: dict[str, Any] = field(default_factory=dict)
+    resume: bool = False
+    comparison_pts: list[int] = field(default_factory=list)
+    analyze_only: bool = False
+
+    cancelled: bool = False
+    paused: bool = False
+    finished: bool = False
+
+    frames_seen: int = 0
+    frames_restored: int = 0
+    frames_passed_through: int = 0
+    regions_detected: int = 0
+    regions_gated: int = 0
+    route_reasons: dict[str, int] = field(default_factory=dict)
+    confidences: list[float] = field(default_factory=list)
+
+    def note_route(self, reason: str) -> None:
+        """Counts a routing reason for the job summary. A router that cannot explain itself…"""
+        self.route_reasons[reason] = self.route_reasons.get(reason, 0) + 1
+
+    def summary(self) -> dict[str, Any]:
+        """What the host reports to the user."""
+        mean_confidence = float(np.mean(self.confidences)) if self.confidences else 0.0
+        return {
+            "framesSeen": self.frames_seen,
+            "framesRestored": self.frames_restored,
+            "framesPassedThrough": self.frames_passed_through,
+            "regionsDetected": self.regions_detected,
+            "regionsGated": self.regions_gated,
+            "routeReasons": dict(sorted(self.route_reasons.items())),
+            "confidenceMean": round(mean_confidence, 4),
+            "passthrough": self.regions_detected == 0,
+            "synthetic": self.frames_restored > 0,
+        }
+
+
+def _setting(settings: dict[str, Any], *path: str, default: Any = None) -> Any:
+    node: Any = settings
+    for key in path:
+        if not isinstance(node, dict) or key not in node:
+            return default
+        node = node[key]
+    return node
+
+
+class JobRunner:
+    """Runs jobs. One instance per worker process; models are loaded lazily and cached."""
+
+    def __init__(self, models_root: Path | None = None) -> None:
+        self.models_root = models_root or MODELS
+        self._segmenter: Any = None
+        self._aligner: Any = None
+
+    # --- capability reporting (§8.3) -------------------------------------------------------------
+
+    def capabilities(self) -> dict[str, Any]:
+        """What this build can do.
+
+        Availability means "we loaded it and ran something", never "a driver reported a device".
+        A device count from a driver query is not availability: models load and *then* fail.
+        """
+        report: dict[str, Any] = {"cudaAvailable": False, "models": self._available_models()}
+
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                probe = torch.randn(64, 64, device="cuda")
+                _ = float((probe @ probe).sum().item())
+                torch.cuda.synchronize()
+                report["cudaAvailable"] = True
+                report["device"] = torch.cuda.get_device_name(0)
+                free, total = torch.cuda.mem_get_info()
+                report["vramFreeBytes"] = int(free)
+                report["vramTotalBytes"] = int(total)
+        except Exception as exc:  # noqa: BLE001 - an unavailable GPU is a fact, not a failure
+            report["cudaError"] = str(exc)
+
+        return report
+
+    def _available_models(self) -> list[dict[str, str]]:
+        index = self.models_root / "index.json"
+        if not index.exists():
+            return []
+        return json.loads(index.read_text(encoding="utf-8")).get("models", [])
+
+    def _model_directory(self, task: str) -> Path | None:
+        for entry in self._available_models():
+            if entry.get("task") == task:
+                return self.models_root / entry["path"]
+        return None
+
+    # --- probe (§8.3) ----------------------------------------------------------------------------
+
+    def probe(self, source_path: str) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Media and hardware facts, with no processing."""
+        info = probe_media(Path(source_path))
+
+        media = {
+            "path": info.path,
+            "container": info.container,
+            "sizeBytes": info.size_bytes,
+            "durationSeconds": info.duration_seconds,
+            "width": info.width,
+            "height": info.height,
+            "nominalFps": float(info.nominal_fps) if info.nominal_fps else None,
+            "isVfr": info.is_vfr,
+            "videoCodec": info.video_codec,
+            "pixelFormat": info.pixel_format,
+            "rotation": info.rotation,
+            "audioStreams": [
+                {"index": s.index, "codec": s.codec, "sampleRate": s.sample_rate,
+                 "channels": s.channels, "language": s.language}
+                for s in info.audio_streams
+            ],
+            "subtitleStreams": info.subtitle_streams,
+        }
+
+        return media, self.capabilities()
+
+    def preview(
+        self,
+        job_id: str,
+        source_path: str,
+        pts: int,
+        settings: dict[str, Any],
+        *,
+        overlay: bool = False,
+    ) -> dict[str, Any]:
+        """Renders one frame. Not implemented yet; reported honestly rather than faked."""
+        raise WorkerError(
+            E1001,
+            "preview is not implemented",
+            jobId=job_id,
+            pts=pts,
+            source=Path(source_path).name,
+            overlay=overlay,
+        )
+
+    # --- the pipeline ----------------------------------------------------------------------------
+
+    def _segment(self, luma: np.ndarray, settings: dict[str, Any]) -> np.ndarray:
+        if self._segmenter is None:
+            from .detect.segmenter import Segmenter
+
+            directory = self._model_directory("mosaic-segmentation")
+            if directory is None:
+                from .errors import E3001
+
+                raise WorkerError(E3001, "no mosaic-segmentation model in the store")
+
+            self._segmenter = Segmenter(
+                directory, device=_setting(settings, "device", default="auto")
+            )
+
+        return self._segmenter.probability(luma)
+
+    def _align(self, target: np.ndarray, neighbour: np.ndarray) -> Any:
+        if self._aligner is None:
+            from .restore.flow import DenseAligner
+
+            self._aligner = DenseAligner()
+
+        return self._aligner.align(target, neighbour)
+
+    def run(self, context: JobContext, emitter: Emitter) -> dict[str, Any]:
+        """Runs one job to completion, cancellation, or a numbered failure."""
+        source = Path(context.source_path)
+        if not source.exists():
+            raise WorkerError(E1001, f"source not found: {source.name}")
+
+        settings = context.settings
+        preset = QualityPreset(_setting(settings, "restoration", "preset", default="Balanced"))
+        window_setting = _setting(settings, "restoration", "temporalWindow", default="auto")
+        window_setting = None if window_setting in (None, "auto") else int(window_setting)
+        min_region_area = int(_setting(settings, "detection", "minRegionArea", default=256))
+        detection_threshold = float(_setting(settings, "detection", "confidence", default=0.45))
+        min_confirm = int(_setting(settings, "detection", "minConfirmFrames", default=2))
+        max_missing = int(_setting(settings, "detection", "maxMissingFrames", default=3))
+        align_conf_min = float(_setting(settings, "restoration", "alignConfMin", default=0.35))
+        feather_px = int(_setting(settings, "restoration", "featherWidth", default=3))
+
+        gate = ConfidenceGate(
+            float(_setting(settings, "restoration", "minRestorationConfidence", default=0.0))
+        )
+        tracker = Tracker(
+            high_confidence=detection_threshold,
+            min_confirm_frames=min_confirm,
+            max_missing_frames=max_missing,
+        )
+        temporal_alpha = TemporalAlpha()
+
+        emitter.progress(context.job_id, Stage.PROBING, 0.0, force=True)
+        info = probe_media(source)
+        total = int((info.duration_seconds or 0) * float(info.nominal_fps or 24)) or None
+
+        from .media.passthrough import run_passthrough
+
+        # A sliding window in presentation order (§5.6). The transform below sees each frame with
+        # its already-decoded neighbours; the media layer carries the timeline.
+        radius = 4
+        history: list[np.ndarray] = []
+        anchor_history: dict[int, list[AnchorObservation]] = {}
+        started = time.time()
+
+        def transform(frame: Any, index: int) -> Any:
+            if context.cancelled:
+                return None
+
+            context.frames_seen = index + 1
+
+            rgb = frame.to_ndarray(format="rgb24")
+            luma = rgb.astype(np.float64) @ np.array([0.299, 0.587, 0.114])
+
+            history.append(luma)
+            if len(history) > 2 * radius + 1:
+                history.pop(0)
+
+            try:
+                probability = self._segment(luma, settings)
+            except WorkerError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - one frame failing is not the job failing
+                emitter.warn(E3002, f"detector failed on frame {index}: {exc}")
+                context.frames_passed_through += 1
+                context.note_route("DetectorFailed")
+                return None
+
+            regions, clamped = extract_regions(
+                probability, threshold=0.5, min_area=min_region_area
+            )
+            if clamped:
+                emitter.warn(W3101, "region count clamped", frame=index)
+
+            context.regions_detected += len(regions)
+            tracks = tracker.update(regions)
+
+            if not any(t.is_restorable and t.region is not None for t in tracks):
+                context.frames_passed_through += 1
+                context.note_route("NoRegion")
+                return None
+
+            changes = detect_cuts(history) if len(history) > 1 else []
+            target_index = len(history) - 1
+            scene_start, scene_end = same_scene_span(
+                changes, target_index, radius, total_frames=len(history)
+            )
+            same_scene = scene_end - scene_start + 1
+
+            output = rgb.astype(np.float64)
+            touched = False
+
+            for track in tracks:
+                if not track.is_restorable or track.region is None:
+                    continue
+
+                outcome = self._restore_track(
+                    track=track,
+                    luma=luma,
+                    history=history,
+                    target_index=target_index,
+                    anchor_history=anchor_history,
+                    same_scene=same_scene,
+                    preset=preset,
+                    window_setting=window_setting,
+                    min_region_area=min_region_area,
+                    align_conf_min=align_conf_min,
+                    gate=gate,
+                    emitter=emitter,
+                    context=context,
+                )
+
+                context.note_route(outcome.decision.reason.value)
+
+                if outcome.decision.path is RestorationPath.PASS_THROUGH or outcome.restored is None:
+                    continue
+
+                context.confidences.append(outcome.confidence)
+
+                # Everything below happens inside the ROI. Restoration ran on luma there, so the
+                # chroma follows by scaling: hue stays put while the detail changes.
+                roi = outcome.roi
+                left, top, right, bottom = roi.bounds
+                crop_luma = luma[top:bottom, left:right]
+
+                ratio = np.divide(
+                    outcome.restored, crop_luma,
+                    out=np.ones_like(crop_luma), where=crop_luma > 1.0,
+                )[:, :, None]
+
+                crop_rgb = output[top:bottom, left:right]
+                restored_rgb = np.clip(crop_rgb * ratio, 0, 255)
+                crop_mask = track.region.mask[top:bottom, left:right]
+
+                for channel in range(3):
+                    crop_rgb[:, :, channel] = blend_region(
+                        crop_rgb[:, :, channel],
+                        restored_rgb[:, :, channel],
+                        crop_mask,
+                        block_size=outcome.profile.block_size,
+                        feather_px=feather_px,
+                        temporal=temporal_alpha,
+                        track_id=track.track_id,
+                    )
+
+                output[top:bottom, left:right] = crop_rgb
+                touched = True
+
+            if index % 8 == 0:
+                fraction = (index / total) if total else 0.0
+                elapsed = max(time.time() - started, 1e-6)
+                emitter.progress(
+                    context.job_id,
+                    Stage.RESTORING,
+                    min(fraction, 0.99),
+                    pts=int(frame.pts) if frame.pts is not None else None,
+                    fps=round((index + 1) / elapsed, 2),
+                )
+
+            if not touched:
+                context.frames_passed_through += 1
+                return None
+
+            context.frames_restored += 1
+
+            import av
+
+            replacement = av.VideoFrame.from_ndarray(
+                np.clip(output, 0, 255).astype(np.uint8), format="rgb24"
+            )
+            replacement.time_base = frame.time_base
+            return replacement
+
+        if context.analyze_only:
+            emitter.progress(context.job_id, Stage.ANALYZING, 0.0, force=True)
+            # Analysis reuses the same transform and simply discards the pixels.
+            result = run_passthrough(
+                source, Path(context.output_path or str(source) + ".analysis.mp4"),
+                transform=transform, preset="ultrafast", crf=40,
+            )
+        else:
+            emitter.progress(context.job_id, Stage.RESTORING, 0.0, force=True)
+            result = run_passthrough(
+                source,
+                Path(context.output_path),
+                transform=transform,
+                encoder=_encoder_for(settings),
+                crf=int(_setting(settings, "encode", "constantQuality", default=18)),
+                preset=_setting(settings, "encode", "preset", default="medium"),
+            )
+
+        emitter.progress(context.job_id, Stage.FINALIZING, 1.0, force=True)
+
+        timeline = result.timeline()
+        summary = context.summary()
+        summary["frameCountPreserved"] = timeline.frame_count_preserved
+        summary["timeline"] = timeline.describe()
+        summary["regionsGated"] = gate.gated_track_count
+
+        if gate.gated_track_count:
+            emitter.warn(
+                W4102,
+                f"{gate.gated_track_count} regions left untouched: evidence below threshold",
+            )
+
+        return summary
+
+    def _restore_track(
+        self,
+        *,
+        track: Track,
+        luma: np.ndarray,
+        history: list[np.ndarray],
+        target_index: int,
+        anchor_history: dict[int, list[AnchorObservation]],
+        same_scene: int,
+        preset: QualityPreset,
+        window_setting: int | None,
+        min_region_area: int,
+        align_conf_min: float,
+        gate: ConfidenceGate,
+        emitter: Emitter,
+        context: JobContext,
+    ) -> "TrackOutcome":
+        """Restores one track's region on one frame, or explains why it did not.
+
+        **Everything happens inside a padded ROI** (§5.5). Running dense flow and back-projection at
+        full frame size costs more than ten times what the job needs and spends VRAM on pixels that
+        are discarded — an earlier version did exactly that and a 96-frame clip did not finish.
+        """
+        region: Region = track.region  # type: ignore[assignment]
+        left, top, right, bottom = region.box
+
+        patch = luma[top:bottom, left:right]
+        if patch.size == 0:
+            return TrackOutcome(route(RouteInputs(has_region=False)), None, 0.0, None, MosaicProfile())
+
+        profile, _ = estimate_geometry(patch)
+
+        observations = anchor_history.setdefault(track.track_id, [])
+        observations.append(
+            AnchorObservation(
+                box_origin=(left, top),
+                phase=(profile.grid_offset_x, profile.grid_offset_y),
+            )
+        )
+        anchor, anchor_confidence = estimate_anchor(
+            observations, (profile.block_width, profile.block_height)
+        )
+        profile = MosaicProfile(
+            kind=profile.kind,
+            block_width=profile.block_width,
+            block_height=profile.block_height,
+            grid_offset_x=profile.grid_offset_x,
+            grid_offset_y=profile.grid_offset_y,
+            anchor=anchor,
+            anchor_confidence=anchor_confidence,
+            confidence=profile.confidence,
+        )
+
+        roi = build_roi(region.box, luma.shape, block_size=profile.block_size)
+
+        window = decide_window(
+            setting=window_setting,
+            preset=preset,
+            motion_pixels_per_frame=track.speed,
+            anchor=anchor,
+            same_scene_frames=same_scene,
+            stream_frames=len(history),
+        )
+        if window.was_reduced:
+            emitter.warn(
+                W4103,
+                f"window reduced to {window.effective}",
+                requested=window.requested,
+                rule=window.reason.value,
+                track=track.track_id,
+            )
+
+        crop_target = roi.crop(luma)
+
+        # **A causal window, not a centred one — a deliberate, documented deviation from §5.6.**
+        #
+        # §5.6 centres the window on the target, which needs a look-ahead of K//2 frames: the writer
+        # trails the reader. This pipeline hands each frame to the encoder as it is produced, so only
+        # past frames exist when a frame is restored.
+        #
+        # Taking K//2 *past* neighbours would leave one neighbour at the measured K=3 and the router
+        # would never reach its two-neighbour minimum — multi-frame would be unreachable while every
+        # log line said the window was 3. So the window keeps its size and spends it backwards.
+        #
+        # The cost is a slightly longer maximum baseline (2 frames back rather than 1 each way), and
+        # docs/phase2-alignment-report.md §3 says shorter baselines align better. Implementing the
+        # look-ahead in the media layer is the correct fix and is recorded in CLAUDE.md §6.
+        neighbour_indices = [
+            i
+            for i in range(target_index - (window.effective - 1), target_index)
+            if 0 <= i < len(history)
+        ]
+
+        alignments = []
+        neighbour_crops = []
+        for index in neighbour_indices:
+            crop = roi.crop(history[index])
+            neighbour_crops.append(crop)
+            try:
+                alignments.append(self._align(crop_target, crop))
+            except Exception as exc:  # noqa: BLE001 - alignment failure degrades, never fails
+                emitter.warn(E4002, f"alignment failed: {exc}", track=track.track_id)
+                alignments.append(None)
+
+        usable = [a for a in alignments if a is not None and a.usable_fraction >= align_conf_min]
+        scored = [a.usable_fraction for a in alignments if a is not None]
+        mean_alignment = float(np.mean(scored)) if scored else 0.0
+
+        # Confidence combines what §5.9.4 asks for: observations, alignment, and how much the block
+        # size destroyed to begin with.
+        block_penalty = float(np.clip(1.0 - (profile.block_size - 4) / 24.0, 0.0, 1.0))
+        confidence = float(
+            np.clip(0.25 + 0.35 * mean_alignment + 0.4 * block_penalty * (len(usable) > 0), 0.0, 1.0)
+        )
+
+        withheld = gate.should_withhold(track.track_id, confidence)
+        if withheld:
+            context.regions_gated += 1
+
+        decision = route(
+            RouteInputs(
+                has_region=True,
+                region_area=region.area,
+                min_region_area=min_region_area,
+                is_confirmed=track.is_restorable,
+                withheld_by_confidence_gate=withheld,
+                anchor=anchor,
+                motion_pixels_per_frame=track.speed,
+                window=window,
+                valid_aligned_neighbours=len(usable),
+                mean_alignment_confidence=mean_alignment,
+                align_conf_min=align_conf_min,
+            )
+        )
+
+        if decision.path is RestorationPath.PASS_THROUGH:
+            return TrackOutcome(decision, None, confidence, roi, profile)
+
+        # The grid phase is measured in frame coordinates, so it has to be re-expressed relative to
+        # the crop's own origin before the operator is applied to the crop.
+        phase = profile.phase_for(left, top)
+        crop_left, crop_top = roi.bounds[0], roi.bounds[1]
+        phase = (
+            (phase[0] + crop_left) % profile.block_width,
+            (phase[1] + crop_top) % profile.block_height,
+        )
+
+        try:
+            if decision.path is RestorationPath.MULTI_FRAME and usable:
+                observations_flow = [
+                    FlowObservation.target(block_average(crop_target, profile, phase))
+                ]
+                observations_flow.extend(
+                    FlowObservation(
+                        block_average(crop, profile, phase),
+                        a.target_to_neighbour,
+                        a.neighbour_to_target,
+                        a.confidence,
+                    )
+                    for crop, a in zip(neighbour_crops, alignments, strict=True)
+                    if a is not None and a.usable_fraction >= align_conf_min
+                )
+                restored = reconstruct_flow(observations_flow, profile, phase, iterations=20).image
+            else:
+                restored = reconstruct(
+                    [Observation(block_average(crop_target, profile, phase), 0.0, 0.0)],
+                    profile,
+                    phase,
+                    iterations=20,
+                ).image
+        except Exception as exc:  # noqa: BLE001 - §5.8.2: degrade, never emit a partial composite
+            emitter.warn(
+                E4002,
+                f"restoration failed: {exc}",
+                track=track.track_id,
+                band=band_for(profile.block_size),
+            )
+            return TrackOutcome(
+                route(RouteInputs(degradation_chain_exhausted=True)), None, confidence, roi, profile
+            )
+
+        # Back to the frame's coordinates, minus the alignment padding (§5.5.3).
+        pad_left, pad_top, pad_right, pad_bottom = roi.reflect
+        trimmed = restored[
+            pad_top : restored.shape[0] - pad_bottom if pad_bottom else restored.shape[0],
+            pad_left : restored.shape[1] - pad_right if pad_right else restored.shape[1],
+        ]
+
+        return TrackOutcome(decision, trimmed, confidence, roi, profile)
+
+
+def _encoder_for(settings: dict[str, Any]) -> str:
+    """Maps the encoder profile to a codec name. prd.md §5.1.4, D-12.
+
+    NVENC is deliberately absent: PyAV bundles its own FFmpeg without it, so the Speed profile has
+    to shell out to `tools/ffmpeg` and that path is not wired up yet. Choosing it silently would
+    give the user x265 while the settings said NVENC.
+    """
+    profile = _setting(settings, "encode", "profile", default="QualityX265")
+    if profile == "SpeedNvenc":
+        raise WorkerError(
+            E4002,
+            "the Speed encoder profile needs tools/ffmpeg and is not wired up yet; "
+            "PyAV's bundled FFmpeg has no NVENC",
+        )
+    return "libx265" if _setting(settings, "encode", "codec", default="H265") == "H265" else "libx264"
