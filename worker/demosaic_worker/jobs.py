@@ -274,13 +274,13 @@ class JobRunner:
 
         return self._segmenter.probability(luma)
 
-    def _align(self, target: np.ndarray, neighbour: np.ndarray) -> Any:
+    def _align(self, target: np.ndarray, neighbour: np.ndarray, *, backward: bool = True) -> Any:
         if self._aligner is None:
             from .restore.flow import DenseAligner
 
             self._aligner = DenseAligner()
 
-        return self._aligner.align(target, neighbour)
+        return self._aligner.align(target, neighbour, backward=backward)
 
     def run(self, context: JobContext, emitter: Emitter) -> dict[str, Any]:
         """Runs one job to completion, cancellation, or a numbered failure."""
@@ -724,7 +724,13 @@ class JobRunner:
 
         if 0 <= previous_index < len(history):
             try:
-                alignments.append(self._align(crop_target, roi.crop(history[previous_index])))
+                # The backward pass exists for `reconstruct_flow`, which warps residuals back
+                # along it. The accumulator warps corrections nowhere, so it costs half the
+                # alignment time for nothing: measured, +2.81 dB either way, 104 ms against
+                # 49 (D-32).
+                alignments.append(
+                    self._align(crop_target, roi.crop(history[previous_index]), backward=False)
+                )
             except Exception as exc:  # noqa: BLE001 - alignment failure degrades, never fails
                 emitter.warn(E4002, f"alignment failed: {exc}", track=track.track_id)
                 alignments.append(None)

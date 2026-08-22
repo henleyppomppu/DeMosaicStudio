@@ -907,3 +907,64 @@ grid remains untested.
 - `make_policy_fixture.py` now generates the whole parity fixture. The confidence gate and smoother
   sections had been added by hand, and the first regeneration silently deleted them: **a generator
   that writes part of a file deletes the rest.**
+
+---
+
+## D-32 — The flow is estimated below full resolution, and only in one direction
+
+**Status:** accepted (2026-08-23) · **Closes:** §6.1 throughput, and 0.8 dB nobody was looking for
+
+### Context
+
+Alignment is half the per-frame cost — 107 ms of the 231 ms — and it runs RAFT **twice**: forward
+for the flow, backward for the forward-backward consistency that becomes the per-pixel confidence.
+
+The accumulator uses the flow every frame. It uses the confidence only as a **scalar** — "is this
+alignment usable at all" — because decaying by it per pixel was measured to cost 2.24 dB (D-29).
+
+### Two findings, one of them not what was being looked for
+
+**The backward pass is free to drop.** Estimating the confidence from a photometric residual instead
+— warp the neighbour onto the target and see where it lands — gives **the same result** (+2.81 dB
+either way) for **half the time** (104 ms against 49).
+
+**Full resolution is the worst place to estimate the flow.** This was a search for speed and turned
+out to be a quality knob:
+
+| clip | 1.00 | 0.75 | 0.50 | 0.35 |
+| --- | ---: | ---: | ---: | ---: |
+| screen | +2.81 | **+5.39** | +5.07 | +4.84 |
+| pan1 | +3.93 | +4.71 | **+4.76** | +4.74 |
+| fast16 | +5.35 | **+5.91** | +5.65 | +5.83 |
+
+Full resolution is worst on all three, by 0.8 to 2.6 dB. The timing barely moves — at these crop
+sizes RAFT is dominated by fixed overhead — so this is not a speed/quality trade at all.
+
+Two mechanisms fit. The mosaic is a screen-fixed high-frequency texture competing with the content
+for the flow estimator's attention, and downscaling suppresses it. Or downscaling shrinks the
+displacement into the range a small model handles best. The `pan1` row — 0.79 px of motion, and
+still better downscaled — favours the first. Three clips cannot separate them.
+
+### Decision
+
+`DEFAULT_FLOW_SCALE = 0.75`, and the backward pass is optional with the pipeline not asking for it.
+
+**The scale never takes a side below `MIN_FLOW_SIZE`.** A crop already smaller than that is padded
+up to it, so shrinking it first replaces content with padding: a 24 px region at 0.75 drops from a
+usable fraction of 0.9 to **0.31**, and small ROIs are this pipeline's common case.
+
+**`neighbour_to_target` is absent rather than approximated** when the backward pass is skipped. A
+plausible stand-in would be used by `reconstruct_flow` without anyone noticing it was not the real
+thing.
+
+### Consequences
+
+| | before | after |
+| --- | ---: | ---: |
+| screen-anchored | +2.296 dB, 84% of frames | **+3.072 dB, 97%** |
+| object-anchored ladder | +2.217 dB, 100% | **+3.013 dB, 100%** |
+| 320×240, 40 frames | +2.83 dB, 4.49 fps | **+4.72 dB, 6.42 fps** |
+| 1680×800, 96 frames | 1.12 fps | **1.37 fps** |
+
+Quality and speed together, which is rare enough to be suspicious — the reason it happens is that
+the two changes are independent: one removes work, the other removes a distraction.

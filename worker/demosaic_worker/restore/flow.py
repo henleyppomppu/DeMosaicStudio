@@ -33,6 +33,30 @@ from torchvision.models.optical_flow import Raft_Small_Weights, raft_small
 #: Forward-backward disagreement, in pixels, above which a pixel is not trusted. §5.7.
 DEFAULT_CONSISTENCY_PX = 1.5
 
+#: Fraction of full resolution the flow is estimated at. **Measured**, and it is not a speed knob:
+#: at these crop sizes RAFT's cost is dominated by fixed overhead, so the timing barely moves.
+#: It is a *quality* knob, and a large one.
+#:
+#: ========  ======  ======  ======  ======
+#: clip      1.00    0.75    0.50    0.35
+#: ========  ======  ======  ======  ======
+#: screen    +2.81   +5.39   +5.07   +4.84
+#: pan1      +3.93   +4.71   +4.76   +4.74
+#: fast16    +5.35   +5.91   +5.65   +5.83
+#: ========  ======  ======  ======  ======
+#:
+#: Full resolution is worst on all three. Two mechanisms fit: the mosaic is a screen-fixed
+#: high-frequency texture that competes with the content for RAFT's attention, and downscaling
+#: shrinks the displacement into the range the small model handles best. The pan1 row - 0.79 px of
+#: motion, and still better downscaled - favours the first. Three clips cannot separate them.
+DEFAULT_FLOW_SCALE = 0.75
+
+#: Photometric residual, in levels, below which a warped pixel counts as landing where it should.
+#: Used when the backward pass is skipped. §5.7 rejects a *per-frame* photometric ratio as a
+#: confidence signal, and this is not that: it stands in for the scalar "is this alignment usable
+#: at all", never for the per-pixel weighting.
+PHOTOMETRIC_TOLERANCE = 12.0
+
 #: RAFT downsamples by 8 and then builds a correlation pyramid over that, so anything smaller than
 #: this on either axis raises "feature maps are too small to be down-sampled".
 #:
@@ -49,8 +73,13 @@ class Alignment:
     #: Flow from the target frame to the neighbour, ``(H, W, 2)`` in pixels.
     target_to_neighbour: np.ndarray
 
-    #: Flow from the neighbour back to the target.
-    neighbour_to_target: np.ndarray
+    #: Flow from the neighbour back to the target, or ``None`` when it was not estimated.
+    #:
+    #: It exists for :func:`reconstruct_flow`, which warps residuals back along it. The accumulator
+    #: does not need it - it warps corrections nowhere - and it costs a second RAFT pass, which is
+    #: half the alignment time. So it is optional, and absent rather than approximated: a plausible
+    #: stand-in would be used without anyone noticing it was not the real thing.
+    neighbour_to_target: np.ndarray | None
 
     #: Per-pixel confidence in ``[0, 1]``, from forward-backward consistency.
     confidence: np.ndarray
@@ -97,23 +126,63 @@ class DenseAligner:
     One instance per process: the network is loaded once and reused. Not thread-safe.
     """
 
-    def __init__(self, device: torch.device | None = None) -> None:
+    def __init__(
+        self,
+        device: torch.device | None = None,
+        *,
+        flow_scale: float = DEFAULT_FLOW_SCALE,
+    ) -> None:
+        if not 0.0 < flow_scale <= 1.0:
+            raise ValueError(f"flow_scale must be in (0, 1], got {flow_scale}")
+
+        self.flow_scale = flow_scale
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = raft_small(weights=Raft_Small_Weights.DEFAULT).to(self.device).eval()
 
         for parameter in self.model.parameters():
             parameter.requires_grad_(False)
 
+    def _effective_scale(self, shape: tuple[int, ...]) -> float:
+        """Downscales only where there is resolution to spare.
+
+        A crop already smaller than :data:`MIN_FLOW_SIZE` is padded up to it, so shrinking it first
+        just replaces content with padding. Measured: a 24 px region at scale 0.75 drops from a
+        usable fraction of 0.9 to 0.31 - the alignment stops working entirely, on exactly the small
+        ROIs that are this pipeline's common case.
+        """
+        shortest = min(shape[:2])
+        if shortest <= MIN_FLOW_SIZE:
+            return 1.0
+
+        return min(1.0, max(self.flow_scale, MIN_FLOW_SIZE / shortest))
+
     @torch.no_grad()
     def _flow(self, a: np.ndarray, b: np.ndarray) -> np.ndarray:
-        first, size = _pad_for_raft(_to_rgb_tensor(a, self.device))
-        second, _ = _pad_for_raft(_to_rgb_tensor(b, self.device))
+        """Estimates flow from ``a`` to ``b``, at :data:`DEFAULT_FLOW_SCALE` of full resolution."""
+        shape = a.shape
+        scale = self._effective_scale(shape)
+
+        first = _to_rgb_tensor(a, self.device)
+        second = _to_rgb_tensor(b, self.device)
+
+        if scale != 1.0:
+            first = F.interpolate(first, scale_factor=scale, mode="bilinear", align_corners=False)
+            second = F.interpolate(second, scale_factor=scale, mode="bilinear", align_corners=False)
+
+        first, size = _pad_for_raft(first)
+        second, _ = _pad_for_raft(second)
 
         # RAFT returns a list of refinement iterations; the last is the estimate.
         flow = self.model(first, second)[-1]
 
         height, width = size
-        return flow[0, :, :height, :width].permute(1, 2, 0).cpu().numpy()
+        flow = flow[:, :, :height, :width]
+
+        if scale != 1.0:
+            # Back to full resolution, and the vectors scale with the geometry they describe.
+            flow = F.interpolate(flow, size=shape, mode="bilinear", align_corners=False) / scale
+
+        return flow[0].permute(1, 2, 0).cpu().numpy()
 
     def align(
         self,
@@ -121,25 +190,36 @@ class DenseAligner:
         neighbour: np.ndarray,
         *,
         consistency_px: float = DEFAULT_CONSISTENCY_PX,
+        backward: bool = True,
     ) -> Alignment:
-        """Estimates flow both ways and derives per-pixel confidence.
+        """Estimates the flow and a per-pixel confidence for it.
 
-        Both directions are needed anyway — one to simulate the neighbour from the target, one to
-        bring a residual back — so forward-backward consistency costs nothing extra beyond the
-        second RAFT pass, and it is the only per-pixel confidence available without a learned
-        uncertainty head.
+        With ``backward`` (the default) the flow is estimated both ways and the confidence is
+        forward-backward consistency: sample the backward flow where the forward flow says each
+        pixel went, and see whether the round trip returns to the origin. That is the only per-pixel
+        confidence available without a learned uncertainty head, and §5.7 asks for per-pixel.
+
+        Without it, the confidence comes from a **photometric** residual - warp the neighbour onto
+        the target and see where it lands. §5.7 rejects a photometric *ratio per frame* as a
+        confidence signal, and this is not that: it is per pixel, and it stands in only for the
+        scalar the accumulator actually consumes. Measured, the two give the same result
+        (+2.81 dB either way) for half the time (104 ms against 49), because the second RAFT pass
+        is the expensive half.
         """
         forward = self._flow(target, neighbour)
-        backward = self._flow(neighbour, target)
 
-        # Sample the backward flow at where the forward flow says each pixel went. If the two agree,
-        # the round trip returns to the origin.
-        round_trip = warp_by_flow(backward, forward)
-        disagreement = np.linalg.norm(forward + round_trip, axis=-1)
+        if backward:
+            reverse = self._flow(neighbour, target)
+            round_trip = warp_by_flow(reverse, forward)
+            disagreement = np.linalg.norm(forward + round_trip, axis=-1)
+            confidence = np.clip(1.0 - disagreement / max(consistency_px, 1e-6), 0.0, 1.0)
+            return Alignment(forward, reverse, confidence.astype(np.float32))
 
-        confidence = np.clip(1.0 - disagreement / max(consistency_px, 1e-6), 0.0, 1.0)
+        landed = warp_by_flow(neighbour.astype(np.float64), forward)
+        residual = np.abs(landed - target.astype(np.float64))
+        confidence = np.clip(1.0 - residual / max(PHOTOMETRIC_TOLERANCE, 1e-6), 0.0, 1.0)
 
-        return Alignment(forward, backward, confidence.astype(np.float32))
+        return Alignment(forward, None, confidence.astype(np.float32))
 
 
 def warp_by_flow(image: np.ndarray, flow: np.ndarray) -> np.ndarray:
