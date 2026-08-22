@@ -1,0 +1,45 @@
+{
+  "clip": "screen",
+  "arms": [
+    {
+      "name": "input",
+      "what": "the mosaicked video itself",
+      "outside_vs_clean": 53.582449366473135,
+      "outside_vs_input": Infinity
+    },
+    {
+      "name": "null run",
+      "what": "re-encode only, restoration disabled",
+      "outside_vs_clean": 48.32411870204225,
+      "outside_vs_input": 48.93484223163594
+    },
+    {
+      "name": "pipeline",
+      "what": "re-encode + restoration",
+      "outside_vs_clean": 47.911980914486,
+      "outside_vs_input": 48.501780050267904
+    }
+  ],
+  "encoderCostDb": 5.258,
+  "pipelineCostDb": 0.412,
+  "bleed": {
+    "untouchedAreaMean": 0.8064,
+    "bleedAreaMean": 0.08662,
+    "bleedShareOfUntouched": 0.1074,
+    "framesMeasured": 96,
+    "bleedPsnrNullRun": 42.301,
+    "bleedPsnrPipeline": 41.216
+  },
+  "coverage": {
+    "frames": 96,
+    "framesFiring": 96,
+    "framesCopyable": 0,
+    "gops": 2,
+    "gopsFiring": 2,
+    "framesInCopyableGops": 0,
+    "keyframes": [
+      0,
+      72
+    ]
+  }
+}

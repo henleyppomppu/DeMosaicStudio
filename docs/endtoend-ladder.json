@@ -1,53 +1,53 @@
 {
-  "clip": "tos_002.mp4",
+  "clip": "ladder",
   "input": {
-    "inside_psnr": 37.243,
+    "inside_psnr": 25.523,
     "outside_psnr": 49.554
   },
   "rungs": [
     {
       "name": "baseline",
       "changed": "detector v0.1.0, mask 0.5, CRF 20",
-      "inside_psnr": 36.3,
-      "inside_ssim": 0.9613,
-      "outside_psnr": 43.506,
-      "frames_improved": 0.021,
+      "inside_psnr": 28.442,
+      "inside_ssim": 0.9767,
+      "outside_psnr": 44.868,
+      "frames_improved": 1.0,
       "regions_detected": 823,
       "frames_restored": 95,
-      "seconds": 477.0
+      "seconds": 221.4
     },
     {
       "name": "model",
       "changed": "+ detector v0.2.0",
-      "inside_psnr": 36.304,
-      "inside_ssim": 0.9615,
-      "outside_psnr": 43.5,
-      "frames_improved": 0.0,
+      "inside_psnr": 28.025,
+      "inside_ssim": 0.9765,
+      "outside_psnr": 44.912,
+      "frames_improved": 1.0,
       "regions_detected": 521,
       "frames_restored": 95,
-      "seconds": 277.8
+      "seconds": 148.5
     },
     {
       "name": "threshold",
       "changed": "+ mask threshold 0.9 (calibrated)",
-      "inside_psnr": 36.446,
-      "inside_ssim": 0.962,
-      "outside_psnr": 43.937,
-      "frames_improved": 0.021,
+      "inside_psnr": 27.856,
+      "inside_ssim": 0.9765,
+      "outside_psnr": 44.958,
+      "frames_improved": 1.0,
       "regions_detected": 177,
       "frames_restored": 95,
-      "seconds": 164.0
+      "seconds": 88.7
     },
     {
       "name": "encode",
       "changed": "+ CRF 12 (measured transparent)",
-      "inside_psnr": 36.55,
-      "inside_ssim": 0.9638,
-      "outside_psnr": 44.984,
-      "frames_improved": 0.031,
+      "inside_psnr": 27.74,
+      "inside_ssim": 0.978,
+      "outside_psnr": 46.345,
+      "frames_improved": 1.0,
       "regions_detected": 177,
       "frames_restored": 95,
-      "seconds": 163.5
+      "seconds": 88.7
     }
   ]
 }

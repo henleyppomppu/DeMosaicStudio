@@ -33,12 +33,11 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "worker"))
 sys.path.insert(0, str(REPO / "training"))
 
-from degradation.mosaic import pixelate  # noqa: E402
-from demosaic_worker.analyze.profile import GridAnchor, MosaicProfile  # noqa: E402
 from demosaic_worker.metrics import psnr, ssim  # noqa: E402
 
+import evalclips  # noqa: E402
+
 PYTHON = REPO / ".venv" / "Scripts" / "python.exe"
-CORPUS = REPO / "training" / "datasets" / "clean"
 ARTIFACTS = REPO / "artifacts"
 
 
@@ -66,42 +65,6 @@ class Score:
     regions_detected: int
     frames_restored: int
     seconds: float
-
-
-def build_input(clip: str, destination: Path, block: int = 10) -> None:
-    """Applies a screen-anchored mosaic to a drifting ellipse, so ground truth exists."""
-    spec = MosaicProfile(block_width=block, block_height=block, anchor=GridAnchor.SCREEN)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-
-    with av.open(str(CORPUS / clip)) as source, av.open(str(destination), mode="w") as out:
-        stream = source.streams.video[0]
-        encoder = out.add_stream("libx264", rate=stream.average_rate)
-        encoder.width = stream.codec_context.width
-        encoder.height = stream.codec_context.height
-        encoder.pix_fmt = "yuv420p"
-        encoder.time_base = stream.time_base
-        encoder.options = {"crf": "18", "preset": "medium"}
-
-        for index, frame in enumerate(source.decode(stream)):
-            rgb = frame.to_ndarray(format="rgb24")
-            height, width, _ = rgb.shape
-
-            cy, cx = height // 2, width // 3 + index * 3
-            ry, rx = 110, 150
-            ys, xs = np.mgrid[0:height, 0:width]
-            region = (((ys - cy) / ry) ** 2 + ((xs - cx) / rx) ** 2) <= 1.0
-
-            degraded = np.stack([pixelate(rgb[:, :, c], spec) for c in range(3)], axis=2)
-            rgb = np.where(region[:, :, None], degraded, rgb).astype(np.uint8)
-
-            replacement = av.VideoFrame.from_ndarray(rgb, format="rgb24")
-            replacement.pts = frame.pts
-            replacement.time_base = frame.time_base
-            for packet in encoder.encode(replacement):
-                out.mux(packet)
-
-        for packet in encoder.encode():
-            out.mux(packet)
 
 
 def run_worker(source: Path, output: Path, rung: Rung) -> dict:
@@ -155,7 +118,8 @@ def _luma(path: Path, limit: int = 200) -> list[np.ndarray]:
     return out
 
 
-def score(clean_path: Path, input_path: Path, output_path: Path) -> tuple[float, float, float, float]:
+def score(clean_path: Path, input_path: Path, output_path: Path,
+          mask_of) -> tuple[float, float, float, float]:
     """Scores inside and outside the mosaicked region separately."""
     clean = _luma(clean_path)
     degraded = _luma(input_path)
@@ -166,17 +130,17 @@ def score(clean_path: Path, input_path: Path, output_path: Path) -> tuple[float,
     outside: list[float] = []
 
     for index in range(count):
-        difference = np.abs(clean[index] - degraded[index])
-        region = difference > 6
-        untouched = difference <= 1
+        # The region comes from the clip, not from thresholding a difference: a threshold marks
+        # only the pixels the block average moved far, which is a holey mask rather than the
+        # region (D-27).
+        region = mask_of(index, clean[index].shape)
+        untouched = np.abs(clean[index] - degraded[index]) <= 1
 
         if region.sum() > 5000:
-            ys, xs = np.nonzero(region)
-            box = (ys.min(), ys.max() + 1, xs.min(), xs.max() + 1)
-            crop = lambda a: a[index][box[0]:box[1], box[2]:box[3]]  # noqa: E731
             inside.append(
-                (psnr(crop(clean), crop(degraded)), psnr(crop(clean), crop(restored)),
-                 ssim(crop(clean), crop(restored)))
+                (psnr(clean[index][region], degraded[index][region]),
+                 psnr(clean[index][region], restored[index][region]),
+                 ssim(clean[index], restored[index]))
             )
 
         if untouched.sum() > 10000:
@@ -195,7 +159,7 @@ def score(clean_path: Path, input_path: Path, output_path: Path) -> tuple[float,
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--clip", default="tos_002.mp4")
+    evalclips.add_argument(parser)
     parser.add_argument("--out", type=Path, default=REPO / "docs" / "endtoend-ladder.json")
     args = parser.parse_args(argv)
 
@@ -206,9 +170,9 @@ def main(argv: list[str] | None = None) -> int:
         Rung("encode", "+ CRF 12 (measured transparent)", "0.2.0", 0.9, 12),
     ]
 
-    source = ARTIFACTS / f"ladder_input_{args.clip}"
-    print(f"building input from {args.clip}", flush=True)
-    build_input(args.clip, source)
+    clip = evalclips.resolve(args.clip)
+    source = clip.degraded
+    print(f"clip: {clip.name} - {clip.what}", flush=True)
 
     scores: list[Score] = []
     for rung in ladder:
@@ -220,7 +184,7 @@ def main(argv: list[str] | None = None) -> int:
         elapsed = time.time() - started
 
         inside_psnr, inside_ssim, outside_psnr, improved = score(
-            CORPUS / args.clip, source, output
+            clip.clean, source, output, clip.mask
         )
         scores.append(
             Score(rung.name, rung.changed, round(inside_psnr, 3), round(inside_ssim, 4),
@@ -231,20 +195,15 @@ def main(argv: list[str] | None = None) -> int:
               f"{summary['regionsDetected']} regions | {elapsed:.0f}s", flush=True)
 
     # The input's own scores are the bar: the pipeline has to beat what it was given.
-    clean = _luma(CORPUS / args.clip)
+    clean = _luma(clip.clean)
     degraded = _luma(source)
     reference_inside = []
     reference_outside = []
     for index in range(min(len(clean), len(degraded))):
-        difference = np.abs(clean[index] - degraded[index])
-        region, untouched = difference > 6, difference <= 1
+        region = clip.mask(index, clean[index].shape)
+        untouched = np.abs(clean[index] - degraded[index]) <= 1
         if region.sum() > 5000:
-            ys, xs = np.nonzero(region)
-            box = (ys.min(), ys.max() + 1, xs.min(), xs.max() + 1)
-            reference_inside.append(
-                psnr(clean[index][box[0]:box[1], box[2]:box[3]],
-                     degraded[index][box[0]:box[1], box[2]:box[3]])
-            )
+            reference_inside.append(psnr(clean[index][region], degraded[index][region]))
         if untouched.sum() > 10000:
             reference_outside.append(psnr(clean[index][untouched], degraded[index][untouched]))
 
@@ -252,7 +211,7 @@ def main(argv: list[str] | None = None) -> int:
     baseline_outside = float(np.mean(reference_outside))
 
     report = {
-        "clip": args.clip,
+        "clip": clip.name,
         "input": {"inside_psnr": round(baseline_inside, 3), "outside_psnr": round(baseline_outside, 3)},
         "rungs": [asdict(s) for s in scores],
     }

@@ -40,6 +40,8 @@ sys.path.insert(0, str(REPO / "worker"))
 from demosaic_worker.metrics import psnr  # noqa: E402
 from demosaic_worker.policies import ConfidenceGate  # noqa: E402
 
+import evalclips  # noqa: E402
+
 CORPUS = REPO / "training" / "datasets" / "clean"
 ARTIFACTS = REPO / "artifacts"
 
@@ -58,7 +60,7 @@ class Applied:
     confidence: float
     grid_confidence: float
     mean_alignment: float
-    usable_neighbours: int
+    evidence_depth: int
     block_size: int
     kind: str
     reason: str
@@ -77,7 +79,8 @@ def _luma(path: Path, limit: int = 400) -> list[np.ndarray]:
 
 
 def score_regions(records: list[dict], clean: list[np.ndarray],
-                  degraded: list[np.ndarray], restored: list[np.ndarray]) -> list[Applied]:
+                  degraded: list[np.ndarray], restored: list[np.ndarray],
+                  mask_of) -> list[Applied]:
     """Scores each logged restoration on the pixels it actually changed.
 
     Using the pixels that changed rather than the whole box matters: the box is the ROI, the blend
@@ -85,6 +88,7 @@ def score_regions(records: list[dict], clean: list[np.ndarray],
     effect towards zero.
     """
     applied: list[Applied] = []
+    untouched_already = 0
 
     for record in records:
         index = record["frame"]
@@ -98,14 +102,23 @@ def score_regions(records: list[dict], clean: list[np.ndarray],
         if changed.sum() < 200:
             continue
 
-        # Ground truth is available here only because the degradation was synthetic: a pixel the
-        # mosaic actually altered differs from the clean original. A region that overlaps none of
-        # them is a false positive, and the pipeline restored clean picture.
-        truth = np.abs(crop(clean) - crop(degraded)) > 6
+        # The truth mask comes from the clip's own definition, not from thresholding a difference.
+        # A threshold marks only the pixels the block average moved far, which is a holey mask
+        # rather than the region - and reading diversity off one of those is how this project
+        # overstated a measurement by an order of magnitude (D-27).
+        truth = mask_of(index, clean[index].shape)[top:bottom, left:right]
         overlap = float((changed & truth).sum()) / float(changed.sum())
 
         before = psnr(crop(clean)[changed], crop(degraded)[changed])
         after = psnr(crop(clean)[changed], crop(restored)[changed])
+
+        if not np.isfinite(before):
+            # The input already matched the original exactly on these pixels, so there was nothing
+            # to restore and "how much did the restoration help" has no answer. It happens on false
+            # positives over untouched picture. Counting them as an infinite loss would make every
+            # aggregate infinite, which is how this was found.
+            untouched_already += 1
+            continue
 
         applied.append(Applied(
             frame=index,
@@ -118,12 +131,15 @@ def score_regions(records: list[dict], clean: list[np.ndarray],
             confidence=record["confidence"],
             grid_confidence=record["gridConfidence"],
             mean_alignment=record["meanAlignment"],
-            usable_neighbours=record["usableNeighbours"],
+            evidence_depth=record["evidenceDepth"],
             block_size=record["blockSize"],
             kind=record["kind"],
             reason=record["reason"],
             true_positive=overlap > 0.10,
         ))
+
+    if untouched_already:
+        print(f"  {untouched_already} regions skipped: the input was already exact there")
 
     return applied
 
@@ -197,21 +213,26 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--clip", default="tos_002.mp4")
-    parser.add_argument("--input", type=Path, default=ARTIFACTS / "ladder_input_tos_002.mp4")
-    parser.add_argument("--output", type=Path, default=ARTIFACTS / "gate_out.mp4")
-    parser.add_argument("--log", type=Path, default=ARTIFACTS / "regions.jsonl")
+    evalclips.add_argument(parser)
+    parser.add_argument("--input", type=Path, help="defaults to the clip's own mosaicked input")
+    parser.add_argument("--output", type=Path, required=True, help="the pipeline's output")
+    parser.add_argument("--log", type=Path, required=True,
+                        help="the region log the same run wrote (settings.diagnostics.regionLog)")
     parser.add_argument("--out", type=Path, default=REPO / "docs" / "gate-calibration.json")
     args = parser.parse_args(argv)
 
-    for path in (args.input, args.output, args.log):
+    clip = evalclips.resolve(args.clip)
+    source = args.input or clip.degraded
+    print(f"clip: {clip.name} - {clip.what}")
+
+    for path in (source, args.output, args.log):
         if not path.exists():
             print(f"missing: {path}", file=sys.stderr)
             return 2
 
     records = [json.loads(line) for line in args.log.read_text(encoding="utf-8").splitlines() if line.strip()]
     rows = score_regions(
-        records, _luma(CORPUS / args.clip), _luma(args.input), _luma(args.output)
+        records, _luma(clip.clean), _luma(source), _luma(args.output), clip.mask
     )
 
     if not rows:
@@ -255,7 +276,7 @@ def main(argv: list[str] | None = None) -> int:
         ("confidence", True),
         ("grid_confidence", True),
         ("mean_alignment", True),
-        ("usable_neighbours", True),
+        ("evidence_depth", True),
         ("block_size", False),
     ]
 
@@ -299,7 +320,7 @@ def main(argv: list[str] | None = None) -> int:
         print()
 
     args.out.write_text(json.dumps({
-        "clip": args.clip,
+        "clip": clip.name,
         "applied": len(rows),
         "helped": len(helped),
         "ungatedWeightedDb": round(ungated, 4),

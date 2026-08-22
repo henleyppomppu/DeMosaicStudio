@@ -809,3 +809,45 @@ Recorded so nobody spends the afternoon again:
 
 Only the uniform horizon helped, and it is the one that touches how long evidence lives rather than
 how strongly each frame speaks.
+
+
+---
+
+## D-30 — The calibrated detection threshold was calibrated in the wrong regime
+
+**Status:** accepted (2026-08-23) · **Reverses:** the operating point of `docs/detector-calibration.json`
+
+### Context
+
+The mask threshold was swept and set to 0.9, and the ablation ladder showed it helping: it cut the
+region count 4.6× and the output improved. That was measured while **restoration was net-harmful**.
+When every restoration damages the picture, fewer regions is strictly better and a tight threshold
+looks like a calibration.
+
+Now that the pipeline restores, the same ladder run on both clips says the opposite:
+
+| rung | screen-anchored | object-anchored ladder |
+| --- | ---: | ---: |
+| detector v0.1.0, mask 0.5 | +2.89 dB | +2.92 dB |
+| + detector v0.2.0 | **+3.21** | +2.50 |
+| + mask 0.9 ("calibrated") | +2.51 | +2.33 |
+| + CRF 12 | +2.30 | +2.22 |
+
+A tight threshold now withholds restorations that would have helped. Both clips agree on the
+direction, which the earlier measurement could not have shown.
+
+### Decision
+
+The CLI default returns to **0.5**, which is the worker's own default and what the detector was
+trained at. `docs/detector-calibration.json` stands as a record of the sweep, not as an operating
+point.
+
+### Consequences
+
+- **Any threshold calibrated against a harmful restoration is measuring harm avoidance**, not
+  detection quality. That applies to the confidence gate too: its oracle is now worth only +0.18 dB
+  over ungated on the screen clip, against +1.5 dB when restoration was damaging. Its default stays
+  0.0 — for a good reason now rather than a cautious one.
+- **v0.2.0 is no longer clearly better than v0.1.0**: +0.33 dB on the screen clip, −0.42 on the
+  ladder. The retraining was justified by a false-positive measurement that is still valid; what
+  changed is that false positives cost less when the thing they trigger is useful.

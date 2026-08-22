@@ -1,0 +1,53 @@
+{
+  "clip": "screen",
+  "input": {
+    "inside_psnr": 25.306,
+    "outside_psnr": 53.582
+  },
+  "rungs": [
+    {
+      "name": "baseline",
+      "changed": "detector v0.1.0, mask 0.5, CRF 20",
+      "inside_psnr": 28.193,
+      "inside_ssim": 0.979,
+      "outside_psnr": 45.726,
+      "frames_improved": 0.812,
+      "regions_detected": 539,
+      "frames_restored": 95,
+      "seconds": 150.6
+    },
+    {
+      "name": "model",
+      "changed": "+ detector v0.2.0",
+      "inside_psnr": 28.518,
+      "inside_ssim": 0.9792,
+      "outside_psnr": 45.864,
+      "frames_improved": 0.979,
+      "regions_detected": 291,
+      "frames_restored": 95,
+      "seconds": 98.9
+    },
+    {
+      "name": "threshold",
+      "changed": "+ mask threshold 0.9 (calibrated)",
+      "inside_psnr": 27.811,
+      "inside_ssim": 0.9789,
+      "outside_psnr": 45.903,
+      "frames_improved": 0.906,
+      "regions_detected": 198,
+      "frames_restored": 95,
+      "seconds": 82.3
+    },
+    {
+      "name": "encode",
+      "changed": "+ CRF 12 (measured transparent)",
+      "inside_psnr": 27.602,
+      "inside_ssim": 0.9806,
+      "outside_psnr": 47.912,
+      "frames_improved": 0.844,
+      "regions_detected": 198,
+      "frames_restored": 95,
+      "seconds": 88.3
+    }
+  ]
+}

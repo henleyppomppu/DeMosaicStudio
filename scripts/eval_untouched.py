@@ -43,6 +43,8 @@ from demosaic_worker.detect.segmenter import Segmenter  # noqa: E402
 from demosaic_worker.media.passthrough import run_passthrough  # noqa: E402
 from demosaic_worker.metrics import psnr  # noqa: E402
 
+import evalclips  # noqa: E402  (scripts/ is on the path as this file's own directory)
+
 CORPUS = REPO / "training" / "datasets" / "clean"
 ARTIFACTS = REPO / "artifacts"
 MODELS = REPO / "models" / "detector"
@@ -187,9 +189,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--clip", default="tos_002.mp4")
-    parser.add_argument("--input", type=Path, default=ARTIFACTS / "ladder_input_tos_002.mp4")
-    parser.add_argument("--pipeline", type=Path, default=ARTIFACTS / "ladder_encode.mp4")
+    evalclips.add_argument(parser)
+    parser.add_argument("--input", type=Path,
+                        help="the mosaicked input; defaults to the clip's own")
+    parser.add_argument("--pipeline", type=Path, required=True,
+                        help="the pipeline's output for that input")
     parser.add_argument("--model", default="det-unet-0.2.0")
     parser.add_argument("--threshold", type=float, default=0.9)
     parser.add_argument("--min-area", type=int, default=1024)
@@ -198,21 +202,25 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, default=REPO / "docs" / "untouched-decomposition.json")
     args = parser.parse_args(argv)
 
-    for path in (args.input, args.pipeline):
+    clip = evalclips.resolve(args.clip)
+    source = args.input or clip.degraded
+    print(f"clip: {clip.name} - {clip.what}", flush=True)
+
+    for path in (source, args.pipeline):
         if not path.exists():
             print(f"missing: {path}", file=sys.stderr)
             return 2
 
     null_output = ARTIFACTS / "nullrun.mp4"
-    print(f"null run: re-encoding {args.input.name} with restoration disabled "
+    print(f"null run: re-encoding {source.name} with restoration disabled "
           f"(x265 {args.preset} CRF {args.crf})", flush=True)
     run_passthrough(
-        args.input, null_output, transform=None,
+        source, null_output, transform=None,
         encoder="libx265", crf=args.crf, preset=args.preset,
     )
 
-    clean = _luma(CORPUS / args.clip)
-    degraded = _luma(args.input)
+    clean = _luma(clip.clean)
+    degraded = _luma(source)
 
     arms = [
         Arm("input", "the mosaicked video itself", *score_outside(clean, degraded, degraded)),
@@ -248,7 +256,7 @@ def main(argv: list[str] | None = None) -> int:
 
     print()
     print("detector coverage - the ceiling on what smart-cut could save here", flush=True)
-    coverage = detector_coverage(args.input, args.model, args.threshold, args.min_area)
+    coverage = detector_coverage(source, args.model, args.threshold, args.min_area)
 
     frames = coverage["frames"]
     print(f"  frames firing         {coverage['framesFiring']:4} / {frames}")
@@ -272,7 +280,7 @@ def main(argv: list[str] | None = None) -> int:
     args.out.write_text(
         json.dumps(
             {
-                "clip": args.clip,
+                "clip": clip.name,
                 "arms": [asdict(a) for a in arms],
                 "encoderCostDb": round(encoder_cost, 3),
                 "pipelineCostDb": round(pipeline_cost, 3),

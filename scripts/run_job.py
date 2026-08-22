@@ -18,11 +18,14 @@ Usage:
     .venv/Scripts/python.exe scripts/run_job.py INPUT.mp4 --probe-only
     .venv/Scripts/python.exe scripts/run_job.py INPUT.mp4 OUT.mp4 --threshold 0.9 --crf 12
 
-What this will do to your video, honestly: on the one clip it has been measured against, the output
-scores about 0.7 dB *below* the input inside the mosaicked region and about 4.6 dB below it
-elsewhere (docs/phase3-endtoend-report.md section 8.3). It runs; it does not yet improve anything.
-Use --dry-run to see what it would detect without writing a file. A job that detects nothing
-is stream-copied rather than re-encoded, so it comes back bit-identical.
+What this will do to your video, honestly: on the two synthetic clips it has been measured against
+it gains about 2.2 to 2.3 dB inside the mosaicked region, improving 84% to 100% of frames, and
+costs about 3 to 6 dB on the rest of the picture - almost all of that the encoder rather than the
+pipeline (docs/forward-model-report.md section 9). The mosaic's block structure is reduced, not
+removed. Nothing has been measured on real footage.
+
+Use --dry-run to see what it would detect without writing a file. A job that detects nothing is
+stream-copied rather than re-encoded, so it comes back bit-identical.
 """
 
 from __future__ import annotations
@@ -93,8 +96,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="detect and report only; writes no file and does not restore")
     parser.add_argument("--sample-every", type=int, default=1,
                         help="with --dry-run, examine every Nth frame (default 1)")
-    parser.add_argument("--threshold", type=float, default=0.9,
-                        help="mask binarization threshold; 0.9 is the calibrated point (default)")
+    parser.add_argument("--threshold", type=float, default=0.5,
+                        help="mask binarization threshold (default 0.5, the worker's own default)")
     parser.add_argument("--confidence", type=float, default=0.45)
     parser.add_argument("--min-area", type=int, default=1024)
     parser.add_argument("--confirm-frames", type=int, default=2)
