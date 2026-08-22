@@ -28795,5 +28795,376 @@
     "SingleFrame/SceneCutTruncatedWindow",
     "SingleFrame/SingleValidFrame",
     "SingleFrame/VramForcedSingleFrame"
-  ]
+  ],
+  "confidenceGateCases": [
+    {
+      "description": "a fresh track is withheld before anything is known",
+      "threshold": 0.4,
+      "confidences": [
+        0.1
+      ],
+      "withheld": [
+        true
+      ],
+      "gatedTrackCount": 1
+    },
+    {
+      "description": "sustained low confidence stays withheld",
+      "threshold": 0.4,
+      "confidences": [
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1
+      ],
+      "withheld": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "gatedTrackCount": 1
+    },
+    {
+      "description": "a confident track opens after the hysteresis window",
+      "threshold": 0.4,
+      "confidences": [
+        0.9,
+        0.9,
+        0.9,
+        0.9,
+        0.9,
+        0.9
+      ],
+      "withheld": [
+        true,
+        true,
+        false,
+        false,
+        false,
+        false
+      ],
+      "gatedTrackCount": 0
+    },
+    {
+      "description": "exactly at the threshold opens the gate",
+      "threshold": 0.4,
+      "confidences": [
+        0.4,
+        0.4,
+        0.4,
+        0.4,
+        0.4,
+        0.4
+      ],
+      "withheld": [
+        true,
+        true,
+        false,
+        false,
+        false,
+        false
+      ],
+      "gatedTrackCount": 0
+    },
+    {
+      "description": "chattering never gets three consecutive frames, so it never opens",
+      "threshold": 0.4,
+      "confidences": [
+        0.39,
+        0.41,
+        0.39,
+        0.41,
+        0.39,
+        0.41,
+        0.39,
+        0.41,
+        0.39,
+        0.41,
+        0.39,
+        0.41,
+        0.39,
+        0.41,
+        0.39,
+        0.41
+      ],
+      "withheld": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "gatedTrackCount": 1
+    },
+    {
+      "description": "open then a sustained fall re-closes it",
+      "threshold": 0.4,
+      "confidences": [
+        0.9,
+        0.9,
+        0.9,
+        0.9,
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1
+      ],
+      "withheld": [
+        true,
+        true,
+        false,
+        false,
+        false,
+        false,
+        true,
+        true,
+        true
+      ],
+      "gatedTrackCount": 1
+    },
+    {
+      "description": "a disabled gate never withholds",
+      "threshold": 0.0,
+      "confidences": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "withheld": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "gatedTrackCount": 0
+    },
+    {
+      "description": "a negative threshold is also disabled",
+      "threshold": -1.0,
+      "confidences": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "withheld": [
+        false,
+        false,
+        false
+      ],
+      "gatedTrackCount": 0
+    },
+    {
+      "description": "a gate above every confidence withholds forever",
+      "threshold": 1.01,
+      "confidences": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "withheld": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "gatedTrackCount": 1
+    },
+    {
+      "description": "a dip that stays within the margin does not re-close it",
+      "threshold": 0.4,
+      "confidences": [
+        0.9,
+        0.42,
+        0.9,
+        0.9,
+        0.9
+      ],
+      "withheld": [
+        true,
+        true,
+        false,
+        false,
+        false
+      ],
+      "gatedTrackCount": 0
+    }
+  ],
+  "confidenceGateInterleaved": {
+    "description": "two tracks fed alternately; gate state is per track",
+    "threshold": 0.4,
+    "confidences": [
+      0.05,
+      0.95
+    ],
+    "withheld": [
+      [
+        true,
+        true
+      ],
+      [
+        true,
+        true
+      ],
+      [
+        true,
+        false
+      ],
+      [
+        true,
+        false
+      ],
+      [
+        true,
+        false
+      ]
+    ],
+    "gatedTrackCount": 1
+  },
+  "confidenceSmootherCases": [
+    {
+      "description": "the first frame passes through unchanged",
+      "window": 3,
+      "confidences": [
+        0.9
+      ],
+      "smoothed": [
+        0.9
+      ]
+    },
+    {
+      "description": "a steady signal converges towards it",
+      "window": 3,
+      "confidences": [
+        0.9,
+        0.9,
+        0.9,
+        0.9,
+        0.9,
+        0.9
+      ],
+      "smoothed": [
+        0.9,
+        0.9,
+        0.9,
+        0.9,
+        0.9,
+        0.9
+      ]
+    },
+    {
+      "description": "a single dip is damped, not followed",
+      "window": 3,
+      "confidences": [
+        0.9,
+        0.3,
+        0.9,
+        0.9
+      ],
+      "smoothed": [
+        0.9,
+        0.7,
+        0.766666667,
+        0.811111111
+      ]
+    },
+    {
+      "description": "a sustained fall is followed, just slowly",
+      "window": 3,
+      "confidences": [
+        0.9,
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1
+      ],
+      "smoothed": [
+        0.9,
+        0.633333333,
+        0.455555556,
+        0.337037037,
+        0.258024691,
+        0.205349794
+      ]
+    },
+    {
+      "description": "a window of one is no smoothing at all",
+      "window": 1,
+      "confidences": [
+        0.9,
+        0.1,
+        0.5
+      ],
+      "smoothed": [
+        0.9,
+        0.1,
+        0.5
+      ]
+    },
+    {
+      "description": "a longer window damps harder",
+      "window": 6,
+      "confidences": [
+        0.9,
+        0.1,
+        0.1,
+        0.1
+      ],
+      "smoothed": [
+        0.9,
+        0.766666667,
+        0.655555556,
+        0.562962963
+      ]
+    }
+  ],
+  "confidenceSmootherInterleaved": {
+    "description": "two tracks fed alternately; smoother state is per track",
+    "window": 3,
+    "confidences": [
+      0.9,
+      0.1
+    ],
+    "smoothed": [
+      [
+        0.9,
+        0.1
+      ],
+      [
+        0.9,
+        0.1
+      ],
+      [
+        0.9,
+        0.1
+      ],
+      [
+        0.9,
+        0.1
+      ]
+    ]
+  }
 }

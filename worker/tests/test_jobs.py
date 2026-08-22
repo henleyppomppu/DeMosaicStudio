@@ -291,3 +291,57 @@ def test_analyze_reports_every_frame_it_decoded_not_just_the_sampled_ones() -> N
 
     assert sampled["framesSeen"] == full["framesSeen"]
     assert sampled["framesExamined"] < full["framesExamined"]
+
+
+# --------------------------------------------------------------------------------------------
+# section 5.8.1 - the confidence gate. It has always existed and has never been exercised.
+# --------------------------------------------------------------------------------------------
+
+
+def test_the_confidence_gate_withholds_and_leaves_the_source_pixels(tmp_path: Path) -> None:
+    """A withheld region must come back as the original picture, not as a weaker restoration.
+
+    `minRestorationConfidence` defaults to 0.0, which disables it, so nothing in the suite had ever
+    run with it on. `docs/gate-calibration.json` measures what it is worth; this measures that it
+    does what it says.
+    """
+    ungated = JobContext(
+        job_id="g1", source_path=str(SOURCE), output_path=str(tmp_path / "ungated.mp4"),
+        settings=_settings(),
+    )
+    open_summary = _runner(AlwaysFires()).run(ungated, _emitter())
+
+    settings = _settings()
+    settings["restoration"] = dict(settings["restoration"])
+    settings["restoration"]["minRestorationConfidence"] = 1.01  # above any reachable confidence
+
+    gated = JobContext(
+        job_id="g2", source_path=str(SOURCE), output_path=str(tmp_path / "gated.mp4"),
+        settings=settings,
+    )
+    shut_summary = _runner(AlwaysFires()).run(gated, _emitter())
+
+    assert open_summary["framesRestored"] > 0, "the ungated arm has to restore something"
+    assert shut_summary["framesRestored"] == 0, "a gate above every confidence must withhold all"
+    assert shut_summary["regionsDetected"] == open_summary["regionsDetected"], (
+        "gating must not change what was detected, only what was written"
+    )
+    assert shut_summary["regionsGated"] > 0, "withheld regions have to be reported (R-8.1d)"
+
+
+def test_a_fully_gated_job_is_a_pass_through(tmp_path: Path) -> None:
+    """The two features have to compose: withholding everything means writing nothing, and writing
+    nothing means R-1.8a applies."""
+    settings = _settings()
+    settings["restoration"] = dict(settings["restoration"])
+    settings["restoration"]["minRestorationConfidence"] = 1.01
+
+    destination = tmp_path / "gated.mp4"
+    context = JobContext(
+        job_id="g3", source_path=str(SOURCE), output_path=str(destination), settings=settings,
+    )
+    summary = _runner(AlwaysFires()).run(context, _emitter())
+
+    assert summary["framesRestored"] == 0
+    assert summary["passthrough"] is True
+    assert _video_stream_digest(destination) == _video_stream_digest(SOURCE)

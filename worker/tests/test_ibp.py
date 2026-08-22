@@ -10,7 +10,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from demosaic_worker.analyze.profile import MosaicProfile
+from demosaic_worker.analyze.profile import GridAnchor, MosaicProfile
 from demosaic_worker.metrics import psnr, shift_bilinear
 from demosaic_worker.restore.ibp import Observation, block_average, reconstruct, upsample_baseline
 
@@ -148,3 +148,61 @@ def test_the_vectorised_operator_matches_the_literal_definition(block_w, block_h
     slow = _block_average_reference(image, spec, (phase_x % block_w, phase_y % block_h))
 
     assert np.allclose(fast, slow)
+
+
+# ------------------------------------------------------------------------------------------
+# The observation is given, not computed. prd.md section 5.7.
+# ------------------------------------------------------------------------------------------
+
+
+def test_a_single_observation_is_an_exact_no_op() -> None:
+    """One observation carries no information beyond itself, and the solver must respect that.
+
+    The residual has zero mean inside every block by construction, so its block average - the
+    back-projection - is identically zero. This holds whatever grid the solver is told to use,
+    which is what makes it a useful invariant: it is true even when the estimate is wrong.
+    """
+    rng = np.random.default_rng(7)
+    truth = rng.uniform(0, 255, size=(96, 96))
+    spec = MosaicProfile(block_width=8, block_height=8, anchor=GridAnchor.SCREEN)
+    observed = block_average(truth, spec, (0, 0))
+
+    for block in (4, 8, 12):
+        for phase in ((0, 0), (3, 5)):
+            wrong = MosaicProfile(block_width=block, block_height=block, anchor=GridAnchor.SCREEN)
+            result = reconstruct([Observation(observed, 0.0, 0.0)], wrong, phase, iterations=20)
+
+            assert np.allclose(result.image, np.clip(observed, 0, 255)), (
+                f"single-frame restoration changed the picture with block={block} phase={phase}"
+            )
+
+
+def test_re_averaging_an_observation_destroys_picture_the_solver_never_touches() -> None:
+    """Why the pipeline passes the crop, not ``block_average(crop)``.
+
+    The forward operator turns the clean surroundings inside the ROI rectangle into block averages.
+    Single-frame restoration is a no-op, so that damage goes straight through to the blend - and
+    with an estimated phase it also re-quantises the mosaic onto a shifted grid. Measured on one
+    clip, undoing this took the pipeline's own share of the untouched-region loss from 1.63 dB to
+    0.26 dB and the halo damage from -4.21 dB to -0.52 dB.
+    """
+    rng = np.random.default_rng(11)
+    scene = rng.uniform(0, 255, size=(64, 64))
+    spec = MosaicProfile(block_width=8, block_height=8, anchor=GridAnchor.SCREEN)
+
+    # Only the left half is mosaicked; the right half is picture the pipeline must not touch.
+    crop = scene.copy()
+    crop[:, :32] = block_average(scene, spec, (0, 0))[:, :32]
+
+    as_given = reconstruct([Observation(crop, 0.0, 0.0)], spec, (0, 0), iterations=20).image
+    re_averaged = reconstruct(
+        [Observation(block_average(crop, spec, (0, 0)), 0.0, 0.0)], spec, (0, 0), iterations=20
+    ).image
+
+    assert np.allclose(as_given, np.clip(crop, 0, 255)), "the crop as given must survive untouched"
+
+    untouched_error = np.abs(re_averaged[:, 32:] - crop[:, 32:]).mean()
+    assert untouched_error > 1.0, (
+        "re-averaging should visibly damage the unmosaicked half; if it no longer does, this test "
+        "has stopped measuring the thing it was written for"
+    )

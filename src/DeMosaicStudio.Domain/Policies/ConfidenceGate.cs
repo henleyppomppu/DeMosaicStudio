@@ -44,6 +44,10 @@ public static class Confidence
 /// confidence is borderline, which is exactly where this feature is supposed to help.
 /// </para>
 /// <para>
+/// <b>A track starts gated.</b> Restoration is an intervention: it takes evidence to begin, not
+/// evidence to stop.
+/// </para>
+/// <para>
 /// This type holds mutable per-track state and is not thread-safe. One instance per job, driven from
 /// the pipeline's ordered stage.
 /// </para>
@@ -53,7 +57,7 @@ public sealed class ConfidenceGate
     /// <summary>Consecutive frames required before the gate state flips. prd.md §5.8.1 R-8.1c.</summary>
     public const int DefaultHysteresisFrames = 3;
 
-    /// <summary>How far above the threshold confidence must climb to leave the gated state.</summary>
+    /// <summary>How far <b>below</b> the threshold confidence must fall to re-close the gate.</summary>
     public const double DefaultReleaseMargin = 0.05;
 
     private readonly Dictionary<int, TrackGateState> _byTrack = [];
@@ -99,11 +103,24 @@ public sealed class ConfidenceGate
         }
 
         ref var state = ref System.Runtime.InteropServices.CollectionsMarshal.GetValueRefOrAddDefault(
-            _byTrack, trackId, out _);
+            _byTrack, trackId, out var existed);
 
+        if (!existed)
+        {
+            // A track starts gated. Restoration is an intervention: it should take evidence to
+            // begin, not evidence to stop. Starting open meant every new track was restored for
+            // (hysteresisFrames - 1) frames regardless of confidence — a gate set above every
+            // reachable confidence still let two frames per track through.
+            state.IsGated = true;
+        }
+
+        // The margin sits on the *closing* side. A user who sets minRestorationConfidence to X means
+        // "restore where confidence is at least X"; putting the margin on the opening side made X
+        // itself unreachable, and made every X within a margin of the confidence ceiling silently
+        // mean "never restore".
         if (state.IsGated)
         {
-            if (smoothedConfidence > _threshold + _releaseMargin)
+            if (smoothedConfidence >= _threshold)
             {
                 state.ConsecutiveAbove++;
                 if (state.ConsecutiveAbove >= _hysteresisFrames)
@@ -120,7 +137,7 @@ public sealed class ConfidenceGate
         }
         else
         {
-            if (smoothedConfidence < _threshold)
+            if (smoothedConfidence < _threshold - _releaseMargin)
             {
                 state.ConsecutiveBelow++;
                 if (state.ConsecutiveBelow >= _hysteresisFrames)

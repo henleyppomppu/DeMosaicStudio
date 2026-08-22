@@ -480,3 +480,96 @@ encoder. `sampleEvery` — in the protocol table since v1.0 and accepted by nobo
   transform's own counter reported 93 frames for a 96-frame file.
 - The analysis summary has no `frameCountPreserved`: no file was written, and claiming a preserved
   timeline would be asserting something about bytes that do not exist.
+
+---
+
+## D-24 — The observation is given, not computed
+
+**Status:** accepted (2026-08-22) · **Closes:** a defect in §5.7's restoration path
+
+### Context
+
+Both restoration paths built their observations by applying the forward operator to the crop:
+
+```python
+reconstruct([Observation(block_average(crop_target, profile, phase), 0.0, 0.0)], ...)
+```
+
+The frame already contains the block averages where the mosaic is — `block_average` is what
+produced them. Applying it again re-quantised the mosaic onto the **estimated** grid, shifting every
+block whenever the phase estimate was off, and destroyed the clean picture inside the ROI rectangle
+but outside the mask, which the dilation-and-feather blend then composited back over the original.
+
+It was invisible because single-frame back-projection is a **no-op by construction** — the residual
+has zero mean inside every block, so its block average is identically zero. The solver could not
+undo what was done to its input, and it could not be blamed for it either.
+
+### Decision
+
+Observations are passed as observed. The forward operator is applied only where the model calls for
+it, inside the solver.
+
+### Consequences
+
+Measured on one clip, one variable changed:
+
+| | before | after |
+| --- | ---: | ---: |
+| pipeline's share of the untouched-region loss | 1.63 dB | **0.26 dB** |
+| damage on altered pixels outside the region | −4.21 dB | **−0.52 dB** |
+| restorations that helped | 20 of 214 | **68 of 208** |
+| inside the region, ungated | −0.759 dB | −0.385 dB |
+
+- Guards: `test_a_single_observation_is_an_exact_no_op` pins the invariant that made this
+  undetectable, and `test_re_averaging_an_observation_destroys_picture_the_solver_never_touches`
+  pins the damage itself.
+- **The model is still not mask-aware.** The forward model assumes the whole crop was block-averaged
+  when only the masked region was. Neighbour crops carry clean observations of content that is
+  mosaicked in the target — which is the entire reason multi-frame could work — and nothing yet
+  distinguishes the two.
+
+---
+
+## D-25 — A confidence gate that means what it says
+
+**Status:** accepted (2026-08-22) · **Closes:** §5.8.1 R-8.1c
+
+### Context
+
+`minRestorationConfidence` had existed since v3.1 and had never been exercised. Measuring it turned
+up three defects at once, each of which made the gate quietly do something other than what it said.
+
+1. **The threshold was unreachable.** Release required `confidence > threshold + margin`, and the
+   confidence formula tops out at `0.25 + 0.35 + 0.4 · blockPenalty` — 0.90 for a 10 px mosaic. No
+   threshold above 0.85 could ever open the gate; above 0.90 it silently meant "never restore".
+2. **A track started open**, so every new track was restored for `hysteresis − 1` frames regardless
+   of confidence. A gate set above every reachable confidence still let two frames per track
+   through, which is how this was found.
+3. **The gate was fed a raw per-frame signal** while its parameter is named `smoothedConfidence`.
+   Being per track and sticky in both directions, one long track opened on a run of good frames and
+   coasted through the bad ones.
+
+### Decision
+
+- The margin guards the **closing** side: open at `confidence >= threshold`, close below
+  `threshold − margin`. A threshold now means "restore where confidence is at least this".
+- **A track starts gated.** Restoration is an intervention: it takes evidence to begin, not evidence
+  to stop.
+- `ConfidenceSmoother` damps confidence per track before the gate sees it, with a time constant of
+  `1 / hysteresisFrames` — the gate's own window, so the two cannot drift apart.
+
+### Consequences
+
+| fed to the gate | best threshold | weighted dB | kept |
+| --- | ---: | ---: | ---: |
+| raw per-frame confidence | 0.91 | 0.0000 (withholds everything) | 0 |
+| **smoothed, α = 1/3** | **0.88** | **+0.0511** | 18 |
+| per-region ideal, no hysteresis — flickers | 0.88 | +0.0751 | 47 |
+
+- Gate and smoother are both locked by `fixtures/parity/policies.json`; the gate had been mirrored
+  in two languages and locked by nothing, and had the same hole in both.
+- **The default stays 0.0 (off).** 0.87 scores −0.60 dB and 0.88 scores +0.05 dB on one synthetic
+  clip. That knife-edge is a reason to record the number, not to ship it.
+- `eval_gate.py` now carries a *shipped gate* arm alongside the idealised per-region sweep. The
+  idealised sweep picked an operating point the real gate could not reach — calibrating against a
+  model of the thing rather than the thing is how that gets shipped as "calibrated".

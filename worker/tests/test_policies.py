@@ -16,6 +16,7 @@ from demosaic_worker.policies import (
     MULTI_FRAME_BANDS,
     WINDOW_BY_MOTION,
     ConfidenceGate,
+    ConfidenceSmoother,
     QualityPreset,
     RestorationPath,
     RouteInputs,
@@ -140,21 +141,37 @@ def test_the_default_gate_withholds_nothing() -> None:
     assert not any(gate.should_withhold(1, 0.0) for _ in range(50))
 
 
-def test_sustained_low_confidence_withholds_after_the_hysteresis_window() -> None:
+def test_a_track_starts_gated() -> None:
+    """Restoration is an intervention: it takes evidence to begin, not evidence to stop.
+
+    This used to be the other way round, and the asymmetry was invisible until a gate set above
+    every reachable confidence was measured still letting two frames per track through — one short
+    of the hysteresis window, every time a track appeared.
+    """
     gate = ConfidenceGate(0.40)
 
-    assert not gate.should_withhold(1, 0.1)
-    assert not gate.should_withhold(1, 0.1)
-    assert gate.should_withhold(1, 0.1)
+    assert gate.should_withhold(1, 0.1), "the very first frame of a track is withheld"
+    assert gate.gated_track_count == 1
+
+
+def test_sustained_low_confidence_stays_withheld() -> None:
+    gate = ConfidenceGate(0.40)
+
+    for _ in range(5):
+        assert gate.should_withhold(1, 0.1)
     assert gate.gated_track_count == 1
 
 
 def test_an_oscillating_signal_does_not_flip_the_gate() -> None:
-    """The reason the decision is per track rather than per frame (§5.8.1 R-8.1c)."""
+    """The reason the decision is per track rather than per frame (§5.8.1 R-8.1c).
+
+    0.41 clears the threshold but not the release margin, so a signal chattering across the
+    threshold never opens the gate — and never chatters the picture either.
+    """
     gate = ConfidenceGate(0.40)
 
     transitions = 0
-    previous = False
+    previous = True  # a track starts gated
     for frame in range(200):
         withheld = gate.should_withhold(1, 0.39 if frame % 2 == 0 else 0.41)
         if withheld != previous:
@@ -164,16 +181,32 @@ def test_an_oscillating_signal_does_not_flip_the_gate() -> None:
     assert transitions == 0
 
 
+def test_a_confident_track_opens_the_gate_and_stays_open() -> None:
+    """The cost of starting gated: a genuinely confident track waits out the hysteresis window."""
+    gate = ConfidenceGate(0.40)
+
+    assert gate.should_withhold(1, 0.9)
+    assert gate.should_withhold(1, 0.9)
+    assert not gate.should_withhold(1, 0.9), "three frames above the margin release it"
+
+    for _ in range(20):
+        assert not gate.should_withhold(1, 0.9)
+
+
 def test_a_sustained_recovery_releases_the_gate_once() -> None:
     gate = ConfidenceGate(0.40)
 
     for _ in range(5):
         gate.should_withhold(1, 0.1)
 
-    assert gate.should_withhold(1, 0.40), "exactly at the threshold is inside the release margin"
+    assert gate.should_withhold(1, 0.40), "one frame at the threshold is not three"
     assert gate.should_withhold(1, 0.80)
-    assert gate.should_withhold(1, 0.80)
-    assert not gate.should_withhold(1, 0.80)
+    assert not gate.should_withhold(1, 0.80), "three consecutive frames at or above it release it"
+
+    # The margin now guards the closing side: a dip that stays within it does not re-close.
+    assert not gate.should_withhold(1, 0.36)
+    assert not gate.should_withhold(1, 0.36)
+    assert not gate.should_withhold(1, 0.36)
 
 
 def test_gate_state_is_per_track() -> None:
@@ -203,3 +236,61 @@ def test_invalid_gate_parameters_are_rejected() -> None:
         ConfidenceGate(0.5, hysteresis_frames=0)
     with pytest.raises(ValueError):
         ConfidenceGate(0.5, release_margin=-0.1)
+
+
+# ------------------------------------------------------------------------------------------
+# Confidence-gate parity. The gate was mirrored in both languages and locked by nothing, and it
+# turned out to have a hole in both: a track started open, so a gate set above every reachable
+# confidence still let `hysteresis - 1` frames through per track.
+# ------------------------------------------------------------------------------------------
+
+
+def test_the_confidence_gate_matches_the_parity_fixture() -> None:
+    for case in _fixture()["confidenceGateCases"]:
+        gate = ConfidenceGate(case["threshold"])
+        got = [gate.should_withhold(1, c) for c in case["confidences"]]
+
+        assert got == case["withheld"], case["description"]
+        assert gate.gated_track_count == case["gatedTrackCount"], case["description"]
+
+
+def test_the_confidence_gate_keeps_track_state_apart() -> None:
+    case = _fixture()["confidenceGateInterleaved"]
+    low, high = case["confidences"]
+
+    gate = ConfidenceGate(case["threshold"])
+    got = [[gate.should_withhold(1, low), gate.should_withhold(2, high)]
+           for _ in case["withheld"]]
+
+    assert got == case["withheld"], case["description"]
+    assert gate.gated_track_count == case["gatedTrackCount"]
+
+
+def test_the_confidence_smoother_matches_the_parity_fixture() -> None:
+    for case in _fixture()["confidenceSmootherCases"]:
+        smoother = ConfidenceSmoother(case["window"])
+        got = [smoother.update(1, c) for c in case["confidences"]]
+
+        assert got == pytest.approx(case["smoothed"], abs=1e-9), case["description"]
+
+
+def test_the_confidence_smoother_keeps_track_state_apart() -> None:
+    case = _fixture()["confidenceSmootherInterleaved"]
+    first, second = case["confidences"]
+
+    smoother = ConfidenceSmoother(case["window"])
+    got = [[smoother.update(1, first), smoother.update(2, second)] for _ in case["smoothed"]]
+
+    # pytest.approx does not compare nested lists; flatten both sides.
+    assert [v for row in got for v in row] == pytest.approx(
+        [v for row in case["smoothed"] for v in row], abs=1e-9
+    ), case["description"]
+
+
+def test_the_smoother_window_defaults_to_the_gate_hysteresis() -> None:
+    """The time constant is the gate's own window, not a tuned number.
+
+    If either moves independently the gate starts reasoning over a span the signal was not averaged
+    over, which is the situation this pair was introduced to end.
+    """
+    assert ConfidenceSmoother().alpha == pytest.approx(1.0 / ConfidenceGate.HYSTERESIS_FRAMES)

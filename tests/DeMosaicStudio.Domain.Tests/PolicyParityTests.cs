@@ -156,4 +156,158 @@ public sealed class PolicyParityTests
 
         Assert.Empty(missing);
     }
+
+    /// <summary>
+    /// Every confidence-gate sequence in the fixture matches, frame by frame.
+    /// <para>
+    /// The gate was mirrored in both languages and locked by nothing, and it had the same hole in
+    /// both: a track started <i>open</i>, so a gate set above every reachable confidence still let
+    /// (hysteresis - 1) frames through each time a track appeared. Sequences, not single calls:
+    /// the whole point of the gate is what it does over time.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void The_confidence_gate_matches_the_worker()
+    {
+        using var document = LoadFixture();
+        var mismatches = new List<string>();
+
+        foreach (var expected in document.RootElement.GetProperty("confidenceGateCases").EnumerateArray())
+        {
+            var description = expected.GetProperty("description").GetString()!;
+            var gate = new ConfidenceGate(Number(expected, "threshold"));
+
+            var confidences = expected.GetProperty("confidences").EnumerateArray()
+                .Select(c => c.GetDouble()).ToList();
+            var wanted = expected.GetProperty("withheld").EnumerateArray()
+                .Select(w => w.GetBoolean()).ToList();
+
+            for (var i = 0; i < confidences.Count; i++)
+            {
+                var got = gate.ShouldWithhold(1, confidences[i]);
+                if (got != wanted[i])
+                {
+                    mismatches.Add($"{description}: frame {i} gave {got}, worker gave {wanted[i]}");
+                }
+            }
+
+            var wantedCount = expected.GetProperty("gatedTrackCount").GetInt32();
+            if (gate.GatedTrackCount != wantedCount)
+            {
+                mismatches.Add(
+                    $"{description}: GatedTrackCount {gate.GatedTrackCount}, worker {wantedCount}");
+            }
+        }
+
+        Assert.Empty(mismatches);
+    }
+
+    /// <summary>Gate state is per track, and interleaving two tracks must not mix them.</summary>
+    [Fact]
+    public void The_confidence_gate_keeps_track_state_apart()
+    {
+        using var document = LoadFixture();
+        var expected = document.RootElement.GetProperty("confidenceGateInterleaved");
+
+        var confidences = expected.GetProperty("confidences").EnumerateArray()
+            .Select(c => c.GetDouble()).ToList();
+        var gate = new ConfidenceGate(Number(expected, "threshold"));
+        var mismatches = new List<string>();
+        var frame = 0;
+
+        foreach (var wantedFrame in expected.GetProperty("withheld").EnumerateArray())
+        {
+            var wanted = wantedFrame.EnumerateArray().Select(w => w.GetBoolean()).ToList();
+            var got = new[] { gate.ShouldWithhold(1, confidences[0]), gate.ShouldWithhold(2, confidences[1]) };
+
+            for (var track = 0; track < wanted.Count; track++)
+            {
+                if (got[track] != wanted[track])
+                {
+                    mismatches.Add($"frame {frame} track {track + 1}: {got[track]} vs {wanted[track]}");
+                }
+            }
+
+            frame++;
+        }
+
+        Assert.Empty(mismatches);
+        Assert.Equal(expected.GetProperty("gatedTrackCount").GetInt32(), gate.GatedTrackCount);
+    }
+
+    /// <summary>
+    /// Every confidence-smoother sequence in the fixture matches.
+    /// <para>
+    /// The smoother exists because the gate's parameter is named <c>smoothedConfidence</c> and the
+    /// pipeline was handing it a raw per-frame value. Both languages have to damp identically, or
+    /// the host's preview of what will be withheld disagrees with what the worker withholds.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void The_confidence_smoother_matches_the_worker()
+    {
+        using var document = LoadFixture();
+        var mismatches = new List<string>();
+
+        foreach (var expected in document.RootElement.GetProperty("confidenceSmootherCases").EnumerateArray())
+        {
+            var description = expected.GetProperty("description").GetString()!;
+            var smoother = new ConfidenceSmoother(expected.GetProperty("window").GetInt32());
+
+            var confidences = expected.GetProperty("confidences").EnumerateArray()
+                .Select(c => c.GetDouble()).ToList();
+            var wanted = expected.GetProperty("smoothed").EnumerateArray()
+                .Select(s => s.GetDouble()).ToList();
+
+            for (var i = 0; i < confidences.Count; i++)
+            {
+                var got = smoother.Update(1, confidences[i]);
+                if (Math.Abs(got - wanted[i]) > 1e-9)
+                {
+                    mismatches.Add($"{description}: frame {i} gave {got}, worker gave {wanted[i]}");
+                }
+            }
+        }
+
+        Assert.Empty(mismatches);
+    }
+
+    /// <summary>Smoother state is per track.</summary>
+    [Fact]
+    public void The_confidence_smoother_keeps_track_state_apart()
+    {
+        using var document = LoadFixture();
+        var expected = document.RootElement.GetProperty("confidenceSmootherInterleaved");
+
+        var confidences = expected.GetProperty("confidences").EnumerateArray()
+            .Select(c => c.GetDouble()).ToList();
+        var smoother = new ConfidenceSmoother(expected.GetProperty("window").GetInt32());
+        var mismatches = new List<string>();
+        var frame = 0;
+
+        foreach (var wantedFrame in expected.GetProperty("smoothed").EnumerateArray())
+        {
+            var wanted = wantedFrame.EnumerateArray().Select(s => s.GetDouble()).ToList();
+            var got = new[] { smoother.Update(1, confidences[0]), smoother.Update(2, confidences[1]) };
+
+            for (var track = 0; track < wanted.Count; track++)
+            {
+                if (Math.Abs(got[track] - wanted[track]) > 1e-9)
+                {
+                    mismatches.Add($"frame {frame} track {track + 1}: {got[track]} vs {wanted[track]}");
+                }
+            }
+
+            frame++;
+        }
+
+        Assert.Empty(mismatches);
+    }
+
+    /// <summary>The smoother's time constant is the gate's own window, in both languages.</summary>
+    [Fact]
+    public void The_smoother_window_defaults_to_the_gate_hysteresis()
+    {
+        Assert.Equal(1.0 / ConfidenceGate.DefaultHysteresisFrames, new ConfidenceSmoother().Alpha, 12);
+    }
 }

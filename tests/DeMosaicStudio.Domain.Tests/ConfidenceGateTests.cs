@@ -27,21 +27,43 @@ public sealed class ConfidenceGateTests
     }
 
     /// <summary>
-    /// T-CONF-GATE-01 — sustained low confidence withholds the region after the hysteresis window,
-    /// and not before it.
+    /// T-CONF-GATE-01 — a track starts gated, and sustained low confidence keeps it that way.
+    /// <para>
+    /// It used to start <i>open</i>, which meant every new track was restored for
+    /// (hysteresis - 1) frames no matter how low its confidence. That was found by measuring: a
+    /// gate set above every reachable confidence still let two frames per track through.
+    /// Restoration is an intervention — it takes evidence to begin, not evidence to stop.
+    /// </para>
     /// </summary>
     [Fact]
     public void Sustained_low_confidence_withholds_the_region_after_the_hysteresis_window()
     {
         var gate = new ConfidenceGate(threshold: 0.40);
 
-        // Two frames below the threshold are not enough: three consecutive frames are required.
-        Assert.False(gate.ShouldWithhold(TrackId, 0.10));
-        Assert.False(gate.ShouldWithhold(TrackId, 0.10));
+        Assert.True(gate.ShouldWithhold(TrackId, 0.10));
+        Assert.True(gate.ShouldWithhold(TrackId, 0.10));
         Assert.True(gate.ShouldWithhold(TrackId, 0.10));
         Assert.True(gate.ShouldWithhold(TrackId, 0.10));
 
         Assert.Equal(1, gate.GatedTrackCount);
+    }
+
+    /// <summary>A confident track waits out the hysteresis window before it is trusted.</summary>
+    [Fact]
+    public void A_confident_track_opens_the_gate_and_stays_open()
+    {
+        var gate = new ConfidenceGate(threshold: 0.40);
+
+        Assert.True(gate.ShouldWithhold(TrackId, 0.90));
+        Assert.True(gate.ShouldWithhold(TrackId, 0.90));
+        Assert.False(gate.ShouldWithhold(TrackId, 0.90));
+
+        for (var frame = 0; frame < 20; frame++)
+        {
+            Assert.False(gate.ShouldWithhold(TrackId, 0.90));
+        }
+
+        Assert.Equal(0, gate.GatedTrackCount);
     }
 
     /// <summary>
@@ -60,7 +82,7 @@ public sealed class ConfidenceGateTests
         var gate = new ConfidenceGate(threshold: 0.40);
 
         var transitions = 0;
-        var previous = false;
+        var previous = true; // a track starts gated
 
         for (var frame = 0; frame < 200; frame++)
         {
@@ -93,14 +115,20 @@ public sealed class ConfidenceGateTests
 
         Assert.True(gate.ShouldWithhold(TrackId, 0.10));
 
-        // Exactly at the threshold is inside the release margin: still withheld.
+        // The threshold means what it says: confidence at or above it counts towards release.
         Assert.True(gate.ShouldWithhold(TrackId, 0.40));
         Assert.True(gate.ShouldWithhold(TrackId, 0.42));
+        Assert.False(gate.ShouldWithhold(TrackId, 0.40));
 
-        // Clearly above threshold + margin for three consecutive frames releases it.
-        Assert.True(gate.ShouldWithhold(TrackId, 0.80));
-        Assert.True(gate.ShouldWithhold(TrackId, 0.80));
-        Assert.False(gate.ShouldWithhold(TrackId, 0.80));
+        // The margin guards the closing side now, so a dip inside it does not re-close.
+        Assert.False(gate.ShouldWithhold(TrackId, 0.36));
+        Assert.False(gate.ShouldWithhold(TrackId, 0.36));
+        Assert.False(gate.ShouldWithhold(TrackId, 0.36));
+
+        // A fall clear of the margin, held for the window, does.
+        Assert.False(gate.ShouldWithhold(TrackId, 0.10));
+        Assert.False(gate.ShouldWithhold(TrackId, 0.10));
+        Assert.True(gate.ShouldWithhold(TrackId, 0.10));
     }
 
     /// <summary>Gate state is per track: one bad track does not withhold another.</summary>

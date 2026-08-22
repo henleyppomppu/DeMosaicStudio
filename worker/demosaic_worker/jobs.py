@@ -45,6 +45,7 @@ from .media.probe import probe as probe_media
 from .messages import Emitter
 from .policies import (
     ConfidenceGate,
+    ConfidenceSmoother,
     QualityPreset,
     RestorationPath,
     RouteInputs,
@@ -76,6 +77,10 @@ class TrackOutcome:
     confidence: float
     roi: Any
     profile: MosaicProfile
+    #: Mean per-pixel alignment quality over the usable neighbours. Diagnostic only.
+    mean_alignment: float = 0.0
+    #: How many neighbours survived alignment. Diagnostic only.
+    usable_neighbours: int = 0
 
 
 @dataclass
@@ -307,6 +312,16 @@ class JobRunner:
         gate = ConfidenceGate(
             float(_setting(settings, "restoration", "minRestorationConfidence", default=0.0))
         )
+        smoother = ConfidenceSmoother()
+
+        # An opt-in, per-region diagnostic trace. This is how the gate's operating point gets
+        # measured: without it there is no way to ask which confidence signal predicts whether a
+        # restoration helped. It is a diagnostic knob, so it stays out of the settings fingerprint
+        # (section 9.3) - turning it on must not discard anyone's cached work.
+        region_log_path = _setting(settings, "diagnostics", "regionLog")
+        region_log = (
+            Path(region_log_path).open("w", encoding="utf-8") if region_log_path else None
+        )
         tracker = Tracker(
             high_confidence=detection_threshold,
             min_confirm_frames=min_confirm,
@@ -422,6 +437,7 @@ class JobRunner:
                     min_region_area=min_region_area,
                     align_conf_min=align_conf_min,
                     gate=gate,
+                    smoother=smoother,
                     emitter=emitter,
                     context=context,
                 )
@@ -450,6 +466,25 @@ class JobRunner:
                     track_id=track.track_id,
                 )
                 touched = True
+
+                if region_log is not None:
+                    left_, top_, right_, bottom_ = roi.bounds
+                    region_log.write(json.dumps({
+                        "frame": index,
+                        "track": track.track_id,
+                        "box": [left_, top_, right_, bottom_],
+                        "area": int(track.region.area),
+                        "confidence": round(outcome.confidence, 4),
+                        "gridConfidence": round(outcome.profile.confidence, 4),
+                        "kind": str(getattr(outcome.profile.kind, "value", outcome.profile.kind)),
+                        "blockSize": int(outcome.profile.block_size),
+                        "anchor": str(getattr(outcome.profile.anchor, "value",
+                                              outcome.profile.anchor)),
+                        "anchorConfidence": round(outcome.profile.anchor_confidence, 4),
+                        "meanAlignment": round(outcome.mean_alignment, 4),
+                        "usableNeighbours": outcome.usable_neighbours,
+                        "reason": outcome.decision.reason.value,
+                    }) + "\n")
 
             if index % 8 == 0:
                 fraction = (index / total) if total else 0.0
@@ -546,6 +581,9 @@ class JobRunner:
             staging.unlink(missing_ok=True)
             raise
 
+        if region_log is not None:
+            region_log.close()
+
         emitter.progress(context.job_id, Stage.FINALIZING, 1.0, force=True)
 
         timeline = result.timeline()
@@ -576,6 +614,7 @@ class JobRunner:
         min_region_area: int,
         align_conf_min: float,
         gate: ConfidenceGate,
+        smoother: ConfidenceSmoother,
         emitter: Emitter,
         context: JobContext,
     ) -> "TrackOutcome":
@@ -677,7 +716,13 @@ class JobRunner:
             np.clip(0.25 + 0.35 * mean_alignment + 0.4 * block_penalty * (len(usable) > 0), 0.0, 1.0)
         )
 
-        withheld = gate.should_withhold(track.track_id, confidence)
+        # The gate's parameter is `smoothed_confidence`, and it used to be handed the raw
+        # per-frame value. The gate is per track and sticky in both directions, so a long track
+        # would open on a run of good frames and coast through the bad ones - measured, that gap
+        # was the difference between the gate reaching +0.05 dB and reaching 0.0 by withholding
+        # everything (docs/gate-calibration.json).
+        smoothed = smoother.update(track.track_id, confidence)
+        withheld = gate.should_withhold(track.track_id, smoothed)
         if withheld:
             context.regions_gated += 1
 
@@ -698,7 +743,9 @@ class JobRunner:
         )
 
         if decision.path is RestorationPath.PASS_THROUGH:
-            return TrackOutcome(decision, None, confidence, roi, profile)
+            return TrackOutcome(
+                decision, None, confidence, roi, profile, mean_alignment, len(usable)
+            )
 
         # The grid phase is measured in frame coordinates, so it has to be re-expressed relative to
         # the crop's own origin before the operator is applied to the crop.
@@ -711,12 +758,10 @@ class JobRunner:
 
         try:
             if decision.path is RestorationPath.MULTI_FRAME and usable:
-                observations_flow = [
-                    FlowObservation.target(block_average(crop_target, profile, phase))
-                ]
+                observations_flow = [FlowObservation.target(crop_target)]
                 observations_flow.extend(
                     FlowObservation(
-                        block_average(crop, profile, phase),
+                        crop,
                         a.target_to_neighbour,
                         a.neighbour_to_target,
                         a.confidence,
@@ -727,7 +772,7 @@ class JobRunner:
                 restored = reconstruct_flow(observations_flow, profile, phase, iterations=20).image
             else:
                 restored = reconstruct(
-                    [Observation(block_average(crop_target, profile, phase), 0.0, 0.0)],
+                    [Observation(crop_target, 0.0, 0.0)],
                     profile,
                     phase,
                     iterations=20,
@@ -750,7 +795,9 @@ class JobRunner:
             pad_left : restored.shape[1] - pad_right if pad_right else restored.shape[1],
         ]
 
-        return TrackOutcome(decision, trimmed, confidence, roi, profile)
+        return TrackOutcome(
+            decision, trimmed, confidence, roi, profile, mean_alignment, len(usable)
+        )
 
 
 def _encoder_for(settings: dict[str, Any]) -> str:

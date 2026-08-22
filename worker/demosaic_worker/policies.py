@@ -284,21 +284,32 @@ class ConfidenceGate:
         return sum(1 for gated, _, _ in self._state.values() if gated)
 
     def should_withhold(self, track_id: int, smoothed_confidence: float) -> bool:
-        """Feeds one frame's confidence and returns whether to keep the original pixels."""
+        """Feeds one frame's confidence and returns whether to keep the original pixels.
+
+        **A track starts gated.** Restoration is an intervention: it should take evidence to begin,
+        not evidence to stop. Starting open meant every new track was restored for
+        ``hysteresis_frames - 1`` frames no matter how low its confidence - a gate set above every
+        reachable confidence still let two frames per track through, which is how this was found.
+        """
         if self.is_disabled:
             return False
 
-        gated, below, above = self._state.get(track_id, (False, 0, 0))
+        gated, below, above = self._state.get(track_id, (True, 0, 0))
 
+        # The margin sits on the *closing* side. A user who sets minRestorationConfidence to X
+        # means "restore where confidence is at least X"; putting the margin on the opening side
+        # made X itself unreachable, and made every X within a margin of the confidence ceiling
+        # silently mean "never restore" - the ceiling is 0.25 + 0.35 + 0.4 * blockPenalty, so for a
+        # 10 px mosaic it is 0.90 and no threshold above 0.85 could ever open the gate.
         if gated:
-            if smoothed_confidence > self._threshold + self._margin:
+            if smoothed_confidence >= self._threshold:
                 above += 1
                 if above >= self._hysteresis:
                     gated, below, above = False, 0, 0
             else:
                 above = 0
         else:
-            if smoothed_confidence < self._threshold:
+            if smoothed_confidence < self._threshold - self._margin:
                 below += 1
                 if below >= self._hysteresis:
                     gated, below, above = True, 0, 0
@@ -310,4 +321,53 @@ class ConfidenceGate:
 
     def forget(self, track_id: int) -> None:
         """Drops a terminated track's state so a long job does not accumulate it."""
+        self._state.pop(track_id, None)
+
+
+class ConfidenceSmoother:
+    """Smooths a track's restoration confidence before the gate sees it. prd.md §5.8.1.
+
+    :class:`ConfidenceGate` takes a parameter called ``smoothed_confidence`` and the pipeline was
+    handing it the raw per-frame value. The mismatch was not cosmetic. Confidence varies frame to
+    frame; the gate's hysteresis is per track and sticky in both directions; so a long track would
+    open on a run of good frames and then coast through the bad ones. Measured on one clip, the
+    per-frame signal could take the output from -0.82 dB to +0.075 dB, and the gate fed raw
+    confidence could reach only 0.0 - by withholding everything.
+
+    The time constant is the gate's own hysteresis window rather than a tuned number: the gate
+    reasons over ``hysteresis_frames``, so the signal it reasons about is averaged over the same
+    span.
+
+    Mirror of ``DeMosaicStudio.Domain.Policies.ConfidenceSmoother`` (§13.4).
+    """
+
+    def __init__(self, window: int = ConfidenceGate.HYSTERESIS_FRAMES) -> None:
+        if window < 1:
+            raise ValueError("window must be >= 1")
+
+        self._alpha = 1.0 / window
+        self._state: dict[int, float] = {}
+
+    @property
+    def alpha(self) -> float:
+        """The exponential weight given to the newest frame."""
+        return self._alpha
+
+    def update(self, track_id: int, confidence: float) -> float:
+        """Feeds one frame's confidence and returns the smoothed value for this track.
+
+        The first frame of a track passes through unchanged: there is nothing to average it with,
+        and seeding from zero would withhold every track's opening frames for a reason that has
+        nothing to do with the evidence.
+        """
+        previous = self._state.get(track_id)
+        smoothed = (
+            confidence if previous is None
+            else self._alpha * confidence + (1.0 - self._alpha) * previous
+        )
+        self._state[track_id] = smoothed
+        return smoothed
+
+    def forget(self, track_id: int) -> None:
+        """Drops a terminated track's state."""
         self._state.pop(track_id, None)
