@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from degradation.motion import (
+from demosaic_worker.analyze.motion import (
     MotionBand,
     classify,
     estimate_translation,
@@ -102,7 +102,7 @@ def test_a_single_frame_has_no_motion() -> None:
 
 def test_content_shift_reports_the_direction_the_content_moved() -> None:
     """The sign that, if got wrong, makes multi-frame score *worse* than single-frame."""
-    from degradation.motion import content_shift
+    from demosaic_worker.analyze.motion import content_shift
 
     base = _textured()
     moved = _shift(base, 4, -3)   # content moves +4 in x, -3 in y
@@ -114,7 +114,7 @@ def test_content_shift_reports_the_direction_the_content_moved() -> None:
 
 
 def test_cumulative_shifts_are_relative_to_the_target_and_zero_at_it() -> None:
-    from degradation.motion import cumulative_content_shifts
+    from demosaic_worker.analyze.motion import cumulative_content_shifts
 
     base = _textured()
     frames = [base]
@@ -131,7 +131,7 @@ def test_cumulative_shifts_are_relative_to_the_target_and_zero_at_it() -> None:
 
 
 def test_an_out_of_range_target_is_rejected() -> None:
-    from degradation.motion import cumulative_content_shifts
+    from demosaic_worker.analyze.motion import cumulative_content_shifts
 
     with pytest.raises(IndexError):
         cumulative_content_shifts([_textured(), _textured(seed=9)], target_index=5)

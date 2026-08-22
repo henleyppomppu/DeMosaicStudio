@@ -15,6 +15,29 @@ public enum GridAnchor
     Unknown,
 }
 
+/// <summary>
+/// Motion bands. prd.md §5.6, thresholds in pixels per frame.
+/// <para>
+/// <see cref="Static"/> is split out of <see cref="Slow"/> because a truly static shot is the
+/// interesting failure case for phase diversity (§1.4.1), not merely a slower version of a slow one:
+/// measurement put it <i>below</i> single-frame despite having the best alignment of any band.
+/// </para>
+/// </summary>
+public enum MotionBand
+{
+    /// <summary>Below 0.25 px/frame. No phase diversity; multi-frame is disabled.</summary>
+    Static,
+
+    /// <summary>0.25 to 1 px/frame. The only band that measurably gains.</summary>
+    Slow,
+
+    /// <summary>1 to 6 px/frame. Gains only with good alignment.</summary>
+    Medium,
+
+    /// <summary>Above 6 px/frame. Correspondence is gone; multi-frame is disabled.</summary>
+    Fast,
+}
+
 /// <summary>Why the effective window is smaller than the requested one. prd.md §5.6.1, warning W4103.</summary>
 public enum WindowReductionReason
 {
@@ -32,6 +55,9 @@ public enum WindowReductionReason
 
     /// <summary>Stepped down by the OOM ladder (§5.14 step 2).</summary>
     VramPressure,
+
+    /// <summary>Motion is outside multi-frame's measured operating window (§5.6, D-16).</summary>
+    MotionBand,
 }
 
 /// <summary>The window actually used for one frame, and why it differs from the request.</summary>
@@ -77,11 +103,45 @@ public static class TemporalWindowPolicy
     /// <summary>Window used when there is no temporal context at all.</summary>
     public const int SingleFrame = 1;
 
-    /// <summary>Motion below this is "low". prd.md §5.6.</summary>
+    /// <summary>Below this a shot is static: no phase diversity to exploit (§1.4.1).</summary>
+    public const double StaticMotionThreshold = 0.25;
+
+    /// <summary>Motion below this is "slow". prd.md §5.6.</summary>
     public const double LowMotionThreshold = 1.0;
 
-    /// <summary>Motion above this is "high". prd.md §5.6.</summary>
+    /// <summary>Motion above this is "fast". prd.md §5.6.</summary>
     public const double HighMotionThreshold = 6.0;
+
+    /// <summary>Bins a motion magnitude. prd.md §5.6.</summary>
+    public static MotionBand Classify(double pixelsPerFrame) => pixelsPerFrame switch
+    {
+        < StaticMotionThreshold => MotionBand.Static,
+        < LowMotionThreshold => MotionBand.Slow,
+        <= HighMotionThreshold => MotionBand.Medium,
+        _ => MotionBand.Fast,
+    };
+
+    /// <summary>
+    /// Window by motion band. **Measured**, not assumed — D-16, <c>docs/phase2-alignment-report.md</c>.
+    /// <para>
+    /// Static and fast are 1 because measurement put both below single-frame even with perfect
+    /// alignment: static has no phase diversity to exploit, fast has no content correspondence left
+    /// to align. The earlier table asked for K of 7-9 at low motion; that was written before any
+    /// experiment and is wrong in both directions.
+    /// </para>
+    /// </summary>
+    public static int WindowForBand(MotionBand band) => band switch
+    {
+        MotionBand.Static => SingleFrame,
+        MotionBand.Slow => 3,
+        MotionBand.Medium => 3,
+        MotionBand.Fast => SingleFrame,
+        _ => throw new ArgumentOutOfRangeException(nameof(band), band, "Unknown motion band."),
+    };
+
+    /// <summary>Bands in which the multi-frame path is permitted at all (§5.8, D-16).</summary>
+    public static bool AllowsMultiFrame(MotionBand band) =>
+        band is MotionBand.Slow or MotionBand.Medium;
 
     /// <summary>
     /// Reconciles §5.6's motion table with §15's per-preset windows: the preset sets the ceiling and
@@ -103,9 +163,12 @@ public static class TemporalWindowPolicy
 
         // Each constraint proposes a ceiling. The smallest wins; ties resolve by this order, which
         // runs most-specific first so the reported reason is the informative one.
+        var band = Classify(inputs.MedianFlowPixelsPerFrame);
+
         var constraints = new (int Ceiling, WindowReductionReason Reason)[]
         {
             (inputs.GridAnchor == GridAnchor.ObjectTracked ? SingleFrame : requested, WindowReductionReason.ObjectAnchoredGrid),
+            (AllowsMultiFrame(band) ? requested : SingleFrame, WindowReductionReason.MotionBand),
             (OddAtMost(inputs.SameSceneFramesAvailable), WindowReductionReason.SceneBoundary),
             (OddAtMost(inputs.StreamFramesAvailable), WindowReductionReason.StreamBoundary),
             (OddAtMost(inputs.VramMaxWindow), WindowReductionReason.VramPressure),
@@ -138,14 +201,7 @@ public static class TemporalWindowPolicy
             return forced;
         }
 
-        var byMotion = inputs.MedianFlowPixelsPerFrame switch
-        {
-            < LowMotionThreshold => 9,
-            <= HighMotionThreshold => 5,
-            _ => 3,
-        };
-
-        return Math.Min(byMotion, cap);
+        return Math.Min(WindowForBand(Classify(inputs.MedianFlowPixelsPerFrame)), cap);
     }
 
     // Windows are centred on the target frame, so only odd sizes are meaningful. A ceiling of 6

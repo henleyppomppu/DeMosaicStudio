@@ -20,14 +20,21 @@ public sealed class TemporalWindowPolicyTests
             StreamFramesAvailable: 9,
             VramMaxWindow: 9);
 
-    /// <summary>T-WINDOW-POLICY-01..03 — the motion table, within the preset's ceiling.</summary>
+    /// <summary>
+    /// T-WINDOW-POLICY-01..03 — the **measured** motion table (D-16,
+    /// <c>docs/phase2-alignment-report.md</c>), within the preset ceiling.
+    /// <para>
+    /// The earlier table asked for K of 7-9 at low motion. Measurement replaced it: low motion is
+    /// the only band that gains at all, and K=3 is as good as K=5 there. Static and fast are 1
+    /// because both measured <i>below</i> single-frame even with perfect alignment.
+    /// </para>
+    /// </summary>
     [Theory]
-    [InlineData(0.5, QualityPreset.Balanced, 7)]   // low motion, capped by Balanced
-    [InlineData(0.5, QualityPreset.Quality, 9)]    // low motion, Quality allows 9
-    [InlineData(3.0, QualityPreset.Balanced, 5)]   // medium motion
-    [InlineData(12.0, QualityPreset.Balanced, 3)]  // high motion
-    [InlineData(0.5, QualityPreset.Fast, 3)]       // Fast caps at 3 regardless of motion
-    public void The_motion_policy_selects_the_window_within_the_preset_ceiling(
+    [InlineData(0.5, QualityPreset.Balanced, 3)]   // slow: the only band that gains
+    [InlineData(0.5, QualityPreset.Quality, 3)]    // a bigger preset does not buy a bigger window
+    [InlineData(3.0, QualityPreset.Balanced, 3)]   // medium
+    [InlineData(0.5, QualityPreset.Fast, 3)]       // Fast ceiling is already 3
+    public void The_motion_policy_selects_the_measured_window(
         double motion, QualityPreset preset, int expected)
     {
         var decision = TemporalWindowPolicy.Decide(Unconstrained(preset: preset, motion: motion));
@@ -37,11 +44,38 @@ public sealed class TemporalWindowPolicyTests
         Assert.False(decision.WasReduced);
     }
 
+    /// <summary>
+    /// Static and fast content disable multi-frame outright, for opposite reasons: nothing new to
+    /// see, and nothing left that corresponds.
+    /// </summary>
+    [Theory]
+    [InlineData(0.05)]
+    [InlineData(20.0)]
+    public void Motion_outside_the_operating_window_collapses_to_a_single_frame(double motion)
+    {
+        var decision = TemporalWindowPolicy.Decide(Unconstrained(motion: motion));
+
+        Assert.Equal(TemporalWindowPolicy.SingleFrame, decision.EffectiveWindow);
+    }
+
+    /// <summary>The band boundaries themselves. prd.md §5.6.</summary>
+    [Theory]
+    [InlineData(0.0, MotionBand.Static)]
+    [InlineData(0.24, MotionBand.Static)]
+    [InlineData(0.25, MotionBand.Slow)]
+    [InlineData(0.99, MotionBand.Slow)]
+    [InlineData(1.0, MotionBand.Medium)]
+    [InlineData(6.0, MotionBand.Medium)]
+    [InlineData(6.01, MotionBand.Fast)]
+    public void Motion_bands_use_the_documented_thresholds(double motion, MotionBand expected) =>
+        Assert.Equal(expected, TemporalWindowPolicy.Classify(motion));
+
     /// <summary>T-WINDOW-POLICY-04 — a scene boundary truncates to the frames available in the scene.</summary>
     [Fact]
     public void A_scene_boundary_truncates_the_window()
     {
-        var inputs = Unconstrained(motion: 0.5) with { SameSceneFramesAvailable = 3 };
+        var inputs = Unconstrained(setting: TemporalWindowSetting.Fixed(9), motion: 0.5)
+            with { SameSceneFramesAvailable = 3 };
 
         var decision = TemporalWindowPolicy.Decide(inputs);
 
@@ -57,7 +91,8 @@ public sealed class TemporalWindowPolicyTests
     [Fact]
     public void An_object_anchored_grid_collapses_to_a_single_frame()
     {
-        var decision = TemporalWindowPolicy.Decide(Unconstrained(anchor: GridAnchor.ObjectTracked, motion: 0.5));
+        var decision = TemporalWindowPolicy.Decide(Unconstrained(
+            setting: TemporalWindowSetting.Fixed(9), anchor: GridAnchor.ObjectTracked, motion: 0.5));
 
         Assert.Equal(TemporalWindowPolicy.SingleFrame, decision.EffectiveWindow);
         Assert.Equal(WindowReductionReason.ObjectAnchoredGrid, decision.Reason);
@@ -67,7 +102,8 @@ public sealed class TemporalWindowPolicyTests
     [Fact]
     public void Vram_pressure_steps_the_window_down()
     {
-        var inputs = Unconstrained(motion: 0.5) with { VramMaxWindow = 3 };
+        var inputs = Unconstrained(setting: TemporalWindowSetting.Fixed(9), motion: 0.5)
+            with { VramMaxWindow = 3 };
 
         var decision = TemporalWindowPolicy.Decide(inputs);
 
@@ -83,9 +119,10 @@ public sealed class TemporalWindowPolicyTests
     [InlineData(9)]
     public void A_fixed_window_is_honoured_when_nothing_constrains_it(int k)
     {
-        // Motion is high, which the adaptive policy would answer with 3. The override wins.
+        // The adaptive policy would answer 3 here. The override wins over the *motion choice* —
+        // note that it does not win over the motion *gate*, which is why this motion is slow.
         var decision = TemporalWindowPolicy.Decide(
-            Unconstrained(setting: TemporalWindowSetting.Fixed(k), motion: 20.0));
+            Unconstrained(setting: TemporalWindowSetting.Fixed(k), motion: 0.5));
 
         Assert.Equal(k, decision.EffectiveWindow);
         Assert.Equal(k, decision.RequestedWindow);
@@ -102,7 +139,8 @@ public sealed class TemporalWindowPolicyTests
     [Fact]
     public void A_fixed_window_does_not_override_the_scene_boundary()
     {
-        var inputs = Unconstrained(setting: TemporalWindowSetting.Fixed(9)) with { SameSceneFramesAvailable = 3 };
+        var inputs = Unconstrained(setting: TemporalWindowSetting.Fixed(9), motion: 0.5)
+            with { SameSceneFramesAvailable = 3 };
 
         var decision = TemporalWindowPolicy.Decide(inputs);
 
@@ -117,7 +155,7 @@ public sealed class TemporalWindowPolicyTests
     public void A_fixed_window_does_not_override_an_object_anchored_grid()
     {
         var decision = TemporalWindowPolicy.Decide(
-            Unconstrained(setting: TemporalWindowSetting.Fixed(9), anchor: GridAnchor.ObjectTracked));
+            Unconstrained(setting: TemporalWindowSetting.Fixed(9), anchor: GridAnchor.ObjectTracked, motion: 0.5));
 
         Assert.Equal(TemporalWindowPolicy.SingleFrame, decision.EffectiveWindow);
         Assert.Equal(WindowReductionReason.ObjectAnchoredGrid, decision.Reason);
@@ -127,7 +165,8 @@ public sealed class TemporalWindowPolicyTests
     [Fact]
     public void A_fixed_window_does_not_override_the_vram_ladder()
     {
-        var inputs = Unconstrained(setting: TemporalWindowSetting.Fixed(9)) with { VramMaxWindow = 5 };
+        var inputs = Unconstrained(setting: TemporalWindowSetting.Fixed(9), motion: 0.5)
+            with { VramMaxWindow = 5 };
 
         var decision = TemporalWindowPolicy.Decide(inputs);
 
@@ -139,7 +178,8 @@ public sealed class TemporalWindowPolicyTests
     [Fact]
     public void A_fixed_window_does_not_override_the_stream_boundary()
     {
-        var inputs = Unconstrained(setting: TemporalWindowSetting.Fixed(9)) with { StreamFramesAvailable = 1 };
+        var inputs = Unconstrained(setting: TemporalWindowSetting.Fixed(9), motion: 0.5)
+            with { StreamFramesAvailable = 1 };
 
         var decision = TemporalWindowPolicy.Decide(inputs);
 
@@ -154,7 +194,8 @@ public sealed class TemporalWindowPolicyTests
     [Fact]
     public void An_even_frame_budget_yields_the_next_lower_odd_window()
     {
-        var inputs = Unconstrained(motion: 0.5) with { SameSceneFramesAvailable = 6 };
+        var inputs = Unconstrained(setting: TemporalWindowSetting.Fixed(9), motion: 0.5)
+            with { SameSceneFramesAvailable = 6 };
 
         Assert.Equal(5, TemporalWindowPolicy.Decide(inputs).EffectiveWindow);
     }

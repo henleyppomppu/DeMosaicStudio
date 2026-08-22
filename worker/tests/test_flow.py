@@ -8,7 +8,7 @@ import pytest
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
-from restore.flow import DenseAligner, warp_by_flow  # noqa: E402
+from demosaic_worker.restore.flow import DenseAligner, warp_by_flow  # noqa: E402
 
 
 def _textured(height: int = 128, width: int = 128, seed: int = 4) -> np.ndarray:

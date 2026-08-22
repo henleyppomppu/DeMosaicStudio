@@ -32,13 +32,14 @@ import av
 import numpy as np
 
 REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO / "worker"))
 sys.path.insert(0, str(REPO / "training"))
 
-from degradation.mosaic import MosaicSpec  # noqa: E402
-from degradation.motion import cumulative_content_shifts  # noqa: E402
-from metrics import psnr, shift_bilinear, ssim  # noqa: E402
-from restore.flow import DenseAligner, warp_by_flow  # noqa: E402
-from restore.ibp import (  # noqa: E402
+from demosaic_worker.analyze.profile import MosaicProfile  # noqa: E402
+from demosaic_worker.analyze.motion import cumulative_content_shifts  # noqa: E402
+from demosaic_worker.metrics import psnr, shift_bilinear, ssim  # noqa: E402
+from demosaic_worker.restore.flow import DenseAligner, warp_by_flow  # noqa: E402
+from demosaic_worker.restore.ibp import (  # noqa: E402
     FlowObservation,
     Observation,
     block_average,
@@ -186,7 +187,7 @@ def _measure_clip(
         )
 
         for block in blocks:
-            spec = MosaicSpec(block_width=block, block_height=block)
+            spec = MosaicProfile(block_width=block, block_height=block)
             phase = (0, 0)
 
             degraded = [block_average(f, spec, phase) for f in frames]

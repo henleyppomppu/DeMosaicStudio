@@ -1,0 +1,76 @@
+{
+  "frames_per_clip": 8,
+  "clips": 24,
+  "histogram": [
+    {
+      "name": "within-shot",
+      "n": 168,
+      "min": 0.0007,
+      "p05": 0.004,
+      "median": 0.0094,
+      "p95": 0.0474,
+      "max": 0.5073
+    },
+    {
+      "name": "across-shot",
+      "n": 276,
+      "min": 0.0852,
+      "p05": 0.1351,
+      "median": 0.364,
+      "p95": 0.958,
+      "max": 0.9913
+    },
+    {
+      "name": "flash",
+      "n": 72,
+      "min": 0.4721,
+      "p05": 0.5114,
+      "median": 0.708,
+      "p95": 0.9339,
+      "max": 0.9996
+    }
+  ],
+  "structure": [
+    {
+      "name": "within-shot",
+      "n": 168,
+      "min": 0.0005,
+      "p05": 0.0018,
+      "median": 0.0204,
+      "p95": 0.6694,
+      "max": 0.9855
+    },
+    {
+      "name": "across-shot",
+      "n": 276,
+      "min": 0.4869,
+      "p05": 0.6933,
+      "median": 0.9245,
+      "p95": 0.9918,
+      "max": 0.9985
+    },
+    {
+      "name": "flash",
+      "n": 72,
+      "min": -0.0,
+      "p05": -0.0,
+      "median": 0.0519,
+      "p95": 0.3372,
+      "max": 0.4209
+    }
+  ],
+  "suggested": {
+    "histogram_threshold": 0.091,
+    "histogram_window": [
+      0.0474,
+      0.1351
+    ],
+    "histogram_separable": true,
+    "structure_threshold": 0.515,
+    "structure_window": [
+      0.3372,
+      0.6933
+    ],
+    "structure_separable": true
+  }
+}

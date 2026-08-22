@@ -35,8 +35,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from degradation.mosaic import MosaicSpec
-from metrics import shift_bilinear
+from ..analyze.profile import MosaicProfile
+from ..metrics import shift_bilinear
 
 
 def grid_edges(length: int, block: int, phase: int) -> np.ndarray:
@@ -54,7 +54,7 @@ def grid_edges(length: int, block: int, phase: int) -> np.ndarray:
     return np.array([0, *interior], dtype=np.int64)
 
 
-def block_average(image: np.ndarray, spec: MosaicSpec, phase: tuple[int, int]) -> np.ndarray:
+def block_average(image: np.ndarray, spec: MosaicProfile, phase: tuple[int, int]) -> np.ndarray:
     """Applies the forward operator: block means on the grid, kept at full resolution.
 
     Vectorised with ``np.add.reduceat``, which handles the partial blocks at the edges exactly —
@@ -107,7 +107,7 @@ class IbpResult:
 
 def reconstruct(
     observations: list[Observation],
-    spec: MosaicSpec,
+    spec: MosaicProfile,
     phase: tuple[int, int],
     *,
     iterations: int = 40,
@@ -230,7 +230,7 @@ class FlowObservation:
 
 def reconstruct_flow(
     observations: list[FlowObservation],
-    spec: MosaicSpec,
+    spec: MosaicProfile,
     phase: tuple[int, int],
     *,
     iterations: int = 40,

@@ -14,7 +14,8 @@ public sealed class RestorationRouterTests
         WithheldByConfidenceGate: false,
         DegradationChainExhausted: false,
         GridAnchor: GridAnchor.Screen,
-        WindowDecision: new TemporalWindowDecision(5, 5, WindowReductionReason.None),
+        MedianFlowPixelsPerFrame: 0.5,   // slow: inside the measured operating window (D-16)
+        WindowDecision: new TemporalWindowDecision(3, 3, WindowReductionReason.None),
         ValidAlignedNeighbours: 4,
         MeanAlignmentConfidence: 0.80,
         AlignConfMin: 0.35,
@@ -101,6 +102,27 @@ public sealed class RestorationRouterTests
             RestorationPath.SingleFrame,
             RouteReason.SingleValidFrame);
 
+    /// <summary>
+    /// The v3.3 motion gate. Measured below single-frame at both ends of the motion range, so this
+    /// is a safety condition rather than an optimisation (D-16).
+    /// </summary>
+    [Theory]
+    [InlineData(0.05)]   // static: no phase diversity to exploit
+    [InlineData(20.0)]   // fast: no content correspondence left
+    public void Motion_outside_the_operating_window_routes_to_single_frame(double motion) =>
+        AssertRoute(
+            Healthy() with { MedianFlowPixelsPerFrame = motion },
+            RestorationPath.SingleFrame,
+            RouteReason.MotionOutsideOperatingWindow);
+
+    /// <summary>Medium motion needs good alignment before it qualifies; slow motion does not.</summary>
+    [Fact]
+    public void Medium_motion_with_poor_alignment_routes_to_single_frame() =>
+        AssertRoute(
+            Healthy() with { MedianFlowPixelsPerFrame = 3.0, MeanAlignmentConfidence = 0.4 },
+            RestorationPath.SingleFrame,
+            RouteReason.MotionOutsideOperatingWindow);
+
     /// <inheritdoc cref="An_object_anchored_grid_routes_to_single_frame"/>
     [Fact]
     public void A_scene_cut_truncated_window_routes_to_single_frame() =>
@@ -142,6 +164,7 @@ public sealed class RestorationRouterTests
         foreach (var occluded in Bools)
         foreach (var anchor in Enum.GetValues<GridAnchor>())
         foreach (var reduction in Enum.GetValues<WindowReductionReason>())
+        foreach (var motion in new[] { 0.1, 0.5, 3.0, 12.0 })
         foreach (var window in new[] { 1, 3, 5 })
         foreach (var neighbours in new[] { 0, 1, 4 })
         foreach (var alignment in new[] { 0.10, 0.80 })
@@ -156,6 +179,7 @@ public sealed class RestorationRouterTests
                 gated,
                 exhausted,
                 anchor,
+                motion,
                 new TemporalWindowDecision(window, 5, reduction),
                 neighbours,
                 alignment,

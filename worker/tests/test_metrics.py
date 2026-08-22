@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from metrics import psnr, shift_bilinear, ssim, warping_error
+from demosaic_worker.metrics import psnr, shift_bilinear, ssim, warping_error
 
 
 def _image(seed: int = 3) -> np.ndarray:

@@ -30,7 +30,7 @@ import av
 import numpy as np
 from PIL import Image
 
-from degradation.mosaic import DegradationType, GridAnchor, MosaicSpec, pixelate
+from degradation.mosaic import DegradationType, GridAnchor, MosaicProfile, pixelate
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,7 +191,7 @@ def make_sample(
         block_h = block if rng.random() < 0.6 else int(rng.integers(4, 25))
         degradation = DegradationType.PIXELATION if rng.random() < 0.75 else DegradationType.BOX_BLUR
 
-        spec = MosaicSpec(
+        spec = MosaicProfile(
             kind=degradation,
             block_width=block,
             block_height=block_h,

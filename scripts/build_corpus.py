@@ -31,9 +31,10 @@ from pathlib import Path
 import av
 import numpy as np
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "worker"))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "training"))
 
-from degradation.motion import MotionSummary, summarize  # noqa: E402
+from demosaic_worker.analyze.motion import MotionSummary, summarize  # noqa: E402
 
 REPO = Path(__file__).resolve().parent.parent
 FFMPEG = REPO / "tools" / "ffmpeg" / "bin" / "ffmpeg.exe"

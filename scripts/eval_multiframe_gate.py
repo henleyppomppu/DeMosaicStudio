@@ -57,12 +57,13 @@ import av
 import numpy as np
 
 REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO / "worker"))
 sys.path.insert(0, str(REPO / "training"))
 
-from degradation.mosaic import GridAnchor, MosaicSpec, band_for  # noqa: E402
-from degradation.motion import cumulative_content_shifts, summarize  # noqa: E402
-from metrics import psnr, shift_bilinear, ssim  # noqa: E402
-from restore.ibp import Observation, block_average, reconstruct, upsample_baseline  # noqa: E402
+from demosaic_worker.analyze.profile import GridAnchor, MosaicProfile, band_for  # noqa: E402
+from demosaic_worker.analyze.motion import cumulative_content_shifts, summarize  # noqa: E402
+from demosaic_worker.metrics import psnr, shift_bilinear, ssim  # noqa: E402
+from demosaic_worker.restore.ibp import Observation, block_average, reconstruct, upsample_baseline  # noqa: E402
 
 FFMPEG = REPO / "tools" / "ffmpeg" / "bin" / "ffmpeg.exe"
 CORPUS = REPO / "training" / "datasets" / "clean"
@@ -253,7 +254,7 @@ def _measure_clip(
     results: list[Measurement] = []
 
     for block in blocks:
-        spec = MosaicSpec(block_width=block, block_height=block, grid_offset_x=0, grid_offset_y=0)
+        spec = MosaicProfile(block_width=block, block_height=block, grid_offset_x=0, grid_offset_y=0)
 
         for anchor in (GridAnchor.SCREEN, GridAnchor.OBJECT):
             for target in positions:

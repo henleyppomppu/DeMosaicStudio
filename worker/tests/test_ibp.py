@@ -10,9 +10,9 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from degradation.mosaic import MosaicSpec
-from metrics import psnr, shift_bilinear
-from restore.ibp import Observation, block_average, reconstruct, upsample_baseline
+from demosaic_worker.analyze.profile import MosaicProfile
+from demosaic_worker.metrics import psnr, shift_bilinear
+from demosaic_worker.restore.ibp import Observation, block_average, reconstruct, upsample_baseline
 
 
 def _detailed(height: int = 96, width: int = 96, seed: int = 21) -> np.ndarray:
@@ -27,20 +27,20 @@ def _detailed(height: int = 96, width: int = 96, seed: int = 21) -> np.ndarray:
     return np.clip(smooth + fine + grain, 0, 255)
 
 
-def _observe(truth: np.ndarray, spec: MosaicSpec, phase: tuple[int, int], dx: float, dy: float) -> Observation:
+def _observe(truth: np.ndarray, spec: MosaicProfile, phase: tuple[int, int], dx: float, dy: float) -> Observation:
     moved = truth if dx == 0.0 and dy == 0.0 else shift_bilinear(truth, dx, dy)
     return Observation(block_average(moved, spec, phase), dx, dy)
 
 
 def test_block_average_is_constant_within_a_block() -> None:
-    spec = MosaicSpec(block_width=8, block_height=8)
+    spec = MosaicProfile(block_width=8, block_height=8)
     out = block_average(_detailed(), spec, (0, 0))
 
     assert np.allclose(out[8:16, 8:16], out[8, 8])
 
 
 def test_the_target_frame_must_be_first_and_stationary() -> None:
-    spec = MosaicSpec(block_width=8, block_height=8)
+    spec = MosaicProfile(block_width=8, block_height=8)
     truth = _detailed()
 
     with pytest.raises(ValueError):
@@ -56,7 +56,7 @@ def test_a_single_frame_reconstruction_does_not_fabricate_detail() -> None:
     This is the honest single-frame result: whatever a learned model would add here comes from its
     prior, not from the data (prd.md §1.3).
     """
-    spec = MosaicSpec(block_width=8, block_height=8)
+    spec = MosaicProfile(block_width=8, block_height=8)
     truth = _detailed()
     observation = _observe(truth, spec, (0, 0), 0.0, 0.0)
 
@@ -71,7 +71,7 @@ def test_more_frames_with_motion_recover_more_detail() -> None:
     Screen-anchored grid, exactly known integer motion, no codec, no noise beyond mild grain. If
     multi-frame cannot win here, it cannot win anywhere.
     """
-    spec = MosaicSpec(block_width=8, block_height=8)
+    spec = MosaicProfile(block_width=8, block_height=8)
     phase = (0, 0)
     truth = _detailed()
 
@@ -91,7 +91,7 @@ def test_frames_without_motion_add_nothing() -> None:
     Five identical observations carry the information of one. A pipeline that spent a multi-frame
     budget here would be doing five times the work for nothing.
     """
-    spec = MosaicSpec(block_width=8, block_height=8)
+    spec = MosaicProfile(block_width=8, block_height=8)
     phase = (0, 0)
     truth = _detailed()
 
@@ -105,7 +105,7 @@ def test_frames_without_motion_add_nothing() -> None:
 
 
 def test_reconstruction_is_deterministic() -> None:
-    spec = MosaicSpec(block_width=8, block_height=8)
+    spec = MosaicProfile(block_width=8, block_height=8)
     truth = _detailed()
     observations = [_observe(truth, spec, (0, 0), dx, 0.0) for dx in (0.0, 3.0, 5.0)]
 
@@ -141,7 +141,7 @@ def _block_average_reference(image, spec, phase):
 @pytest.mark.parametrize("phase_y", [0, 3])
 def test_the_vectorised_operator_matches_the_literal_definition(block_w, block_h, phase_x, phase_y):
     """Partial blocks at the edges are where a fast path usually goes quietly wrong."""
-    spec = MosaicSpec(block_width=block_w, block_height=block_h)
+    spec = MosaicProfile(block_width=block_w, block_height=block_h)
     image = _detailed(53, 67)   # deliberately not a multiple of any block size
 
     fast = block_average(image, spec, (phase_x % block_w, phase_y % block_h))

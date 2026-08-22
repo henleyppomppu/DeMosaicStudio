@@ -261,3 +261,36 @@ why §5.9.4 now requires it per pixel rather than per frame.
 **Reversal cost: Low.** `DenseAligner` is one class behind one interface.
 
 **Date:** 2026-08-22.
+
+---
+
+## D-18 — Scene-cut thresholds are calibrated, and the first structure signal was wrong
+
+**Decided.** Cut detection uses two signals with thresholds measured on the corpus by
+`scripts/calibrate_scene_cuts.py`:
+
+| Signal | Threshold | Separation measured |
+| --- | ---: | --- |
+| histogram distance | **0.09** | continuations p95 0.047 · cuts p05 0.135 |
+| structure = `1 - |NCC|` | **0.515** | flashes p95 0.337 · cuts p05 0.693 |
+
+**Rejected:** the original structure measure — mean absolute difference of peak-normalised gradient
+maps — and the original guessed thresholds (0.45 / 0.30).
+
+**Why.** The calibration showed the gradient measure did not separate the populations *at all*:
+within-shot p95 was 0.058 against across-shot p05 of 0.042, fully overlapping. It would have made
+the second signal pure noise, and since the second signal is the only thing distinguishing a flash
+from a cut, every flash would have reset temporal context.
+
+Normalised cross-correlation is invariant to the affine luminance change a flash applies, which is
+precisely the discrimination required. After the swap both signals separate cleanly.
+
+**Method note.** The two thresholds are calibrated against *different* populations, because they are
+confusable with different things: the histogram threshold must sit above ordinary continuations, and
+the structure threshold must sit above flashes. Using one population for both is what produced the
+first, unusable number.
+
+**Reversal cost: Low.** Two constants and one function, with the calibration script checked in so
+the numbers can be re-derived rather than re-guessed.
+
+**Date:** 2026-08-22.

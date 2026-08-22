@@ -37,6 +37,16 @@ public enum RouteReason
     /// <summary>Grid moves with the object, so neighbours carry no new information (§5.4.4).</summary>
     ObjectAnchoredGrid,
 
+    /// <summary>
+    /// Motion is outside multi-frame's measured operating window (§5.8 v3.3, D-16).
+    /// <para>
+    /// Too still and there is no phase diversity; too fast and the neighbours no longer contain the
+    /// target's content. Both were measured <i>below</i> single-frame, so attempting multi-frame
+    /// there is harmful rather than merely wasteful.
+    /// </para>
+    /// </summary>
+    MotionOutsideOperatingWindow,
+
     /// <summary>The OOM ladder forced the window below the multi-frame minimum (§5.14).</summary>
     VramForcedSingleFrame,
 
@@ -73,6 +83,7 @@ public readonly record struct RouteDecision(RestorationPath Path, RouteReason Re
 /// <param name="WithheldByConfidenceGate">Result of <see cref="ConfidenceGate.ShouldWithhold"/> (§5.8.1).</param>
 /// <param name="DegradationChainExhausted">Whether E4002/E4003/E4004 handling ran out of options (§5.8.2).</param>
 /// <param name="GridAnchor">Grid anchoring for the track (§5.4.4).</param>
+/// <param name="MedianFlowPixelsPerFrame">Region motion, which gates the multi-frame path (D-16).</param>
 /// <param name="WindowDecision">Effective temporal window and why it was reduced (§5.6.1).</param>
 /// <param name="ValidAlignedNeighbours">Neighbours that survived the alignment-confidence filter (§5.7).</param>
 /// <param name="MeanAlignmentConfidence">Mean confidence of those neighbours.</param>
@@ -87,6 +98,7 @@ public readonly record struct RouteInputs(
     bool WithheldByConfidenceGate,
     bool DegradationChainExhausted,
     GridAnchor GridAnchor,
+    double MedianFlowPixelsPerFrame,
     TemporalWindowDecision WindowDecision,
     int ValidAlignedNeighbours,
     double MeanAlignmentConfidence,
@@ -104,6 +116,16 @@ public static class RestorationRouter
 {
     /// <summary>Minimum neighbours for the multi-frame path. prd.md §5.8 Path A.</summary>
     public const int MinNeighboursForMultiFrame = 2;
+
+    /// <summary>
+    /// Alignment confidence required before medium-motion content may use multi-frame.
+    /// <para>
+    /// Slow motion gains regardless; medium only gains when the frames actually correspond, and
+    /// measurement found a per-frame photometric measure admitting 86% of neighbours in that band
+    /// while the result was still 1.76 dB below single-frame.
+    /// </para>
+    /// </summary>
+    public const double MediumBandAlignmentMin = 0.60;
 
     /// <summary>Routes one region on one frame.</summary>
     public static RouteDecision Route(RouteInputs inputs)
@@ -145,6 +167,20 @@ public static class RestorationRouter
             return new RouteDecision(RestorationPath.SingleFrame, RouteReason.ObjectAnchoredGrid);
         }
 
+        // The v3.3 motion gate. Outside the measured operating window a multi-frame solver scores
+        // below single-frame, so this is a safety condition rather than an optimisation (D-16).
+        var band = TemporalWindowPolicy.Classify(inputs.MedianFlowPixelsPerFrame);
+
+        if (!TemporalWindowPolicy.AllowsMultiFrame(band))
+        {
+            return new RouteDecision(RestorationPath.SingleFrame, RouteReason.MotionOutsideOperatingWindow);
+        }
+
+        if (band == MotionBand.Medium && inputs.MeanAlignmentConfidence < MediumBandAlignmentMin)
+        {
+            return new RouteDecision(RestorationPath.SingleFrame, RouteReason.MotionOutsideOperatingWindow);
+        }
+
         if (inputs.OcclusionInvalidatedNeighbours)
         {
             return new RouteDecision(RestorationPath.SingleFrame, RouteReason.OcclusionInvalidatedNeighbours);
@@ -157,6 +193,7 @@ public static class RestorationRouter
                 WindowReductionReason.SceneBoundary => RouteReason.SceneCutTruncatedWindow,
                 WindowReductionReason.VramPressure => RouteReason.VramForcedSingleFrame,
                 WindowReductionReason.ObjectAnchoredGrid => RouteReason.ObjectAnchoredGrid,
+                WindowReductionReason.MotionBand => RouteReason.MotionOutsideOperatingWindow,
                 _ => RouteReason.SingleValidFrame,
             };
 
