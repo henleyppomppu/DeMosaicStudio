@@ -6,9 +6,11 @@ frame and the mask is exact by construction.
 
 Three choices here matter more than the rest.
 
-**Negatives are in-distribution.** A fraction of samples carry no mosaic at all, and some carry
-manufactured hard negatives — genuine low-bitrate blocking, resampling softness, heavy grain. A
-detector trained only on positives learns "output a mask", not "find a mosaic" (§5.2.5, §11.4).
+**Negatives are half the data, and most of them are hard.** A detector trained mostly on positives
+learns "output a mask", not "find a mosaic" (§5.2.5, §11.4). The first end-to-end run showed exactly
+that failure — nine regions found in a clip containing one — and a threshold sweep showed no
+operating point could repair it. The rates below were raised in response: 50% negatives, 70% of
+those manufactured hard negatives rather than plain clean crops.
 
 **Every sample is recompressed.** Codec quantisation is what a real detector sees, and the Phase 0
 gate measured how much it changes (§11.3). JPEG stands in for H.264 during training because it is
@@ -134,18 +136,29 @@ def _hard_negative(crop: np.ndarray, rng: np.random.Generator) -> np.ndarray:
     """Manufactures a clean-but-confusing crop. prd.md §11.4.
 
     These are *real* artifacts rather than imitations of them: aggressive JPEG produces genuine
-    encoder blocking, and downscale-then-upscale produces genuine resampling softness. Both look
-    enough like a mosaic to a naive detector to be worth training against, and neither is one.
+    encoder blocking, downscale-then-upscale produces genuine resampling softness, and a box filter
+    produces genuine detail loss. Each looks enough like a mosaic to a naive detector to be worth
+    training against, and none of them is one.
+
+    **Expanded after the first end-to-end run.** The detector fired on nine regions in a clip
+    containing one, and `scripts/calibrate_detector.py` then showed no threshold could fix it:
+    at 0.99 the model still fired on 18.8% of clean frames against a 0.5% bar. That is a training
+    signal problem, not an operating-point problem, so the negative classes below were widened —
+    particularly at the small-block end, where `docs/phase1-detector-report.md` §3.2 measured the
+    detector to be weakest (IoU 0.748 at 4-6 px against 0.878 at 19-24 px) and where a faint mosaic
+    and ordinary compression are nearly the same signal.
     """
-    choice = rng.integers(0, 3)
+    choice = rng.integers(0, 6)
 
     if choice == 0:
-        # Severe blocking from a real quantiser.
-        return _jpeg_roundtrip(crop, int(rng.integers(3, 12)))
+        # Severe blocking from a real quantiser. JPEG works on 8x8 blocks, so this is the closest
+        # thing to a small-block mosaic that is not one: it keeps ringing and high-frequency
+        # residue inside each block, where a mosaic block is flat.
+        return _jpeg_roundtrip(crop, int(rng.integers(2, 15)))
 
     if choice == 1:
-        # Upscaled low resolution: soft, but with no grid.
-        factor = int(rng.integers(3, 9))
+        # Upscaled low resolution: soft, no grid.
+        factor = int(rng.integers(2, 9))
         small = Image.fromarray(crop, mode="L").resize(
             (max(1, crop.shape[1] // factor), max(1, crop.shape[0] // factor)),
             Image.Resampling.BILINEAR,
@@ -154,9 +167,40 @@ def _hard_negative(crop: np.ndarray, rng: np.random.Generator) -> np.ndarray:
             small.resize((crop.shape[1], crop.shape[0]), Image.Resampling.BILINEAR), dtype=np.uint8
         )
 
-    # Heavy grain.
-    noisy = crop.astype(np.float64) + rng.normal(0, rng.uniform(12, 30), crop.shape)
-    return np.clip(noisy, 0, 255).astype(np.uint8)
+    if choice == 2:
+        # Heavy grain.
+        noisy = crop.astype(np.float64) + rng.normal(0, rng.uniform(12, 35), crop.shape)
+        return np.clip(noisy, 0, 255).astype(np.uint8)
+
+    if choice == 3:
+        # Defocus: a box blur is not a lens, but it destroys detail without imposing a grid, which
+        # is the property that matters here. Real bokeh still has to be collected (§11.4).
+        radius = int(rng.integers(2, 7))
+        blurred = crop.astype(np.float64)
+        for _ in range(2):
+            padded = np.pad(blurred, radius, mode="reflect")
+            cumulative = np.cumsum(np.cumsum(padded, axis=0), axis=1)
+            cumulative = np.pad(cumulative, ((1, 0), (1, 0)))
+            size = 2 * radius + 1
+            blurred = (
+                cumulative[size:, size:] - cumulative[:-size, size:]
+                - cumulative[size:, :-size] + cumulative[:-size, :-size]
+            ) / (size * size)
+        return np.clip(blurred, 0, 255).astype(np.uint8)
+
+    if choice == 4:
+        # Content that is *genuinely* on a grid and must not be restored: tiling, mesh, blinds.
+        # A synthetic approximation is the wrong teacher for real pixel art or an LED wall (§11.4),
+        # but a detector that has never seen any periodic structure will call all of it mosaic.
+        height, width = crop.shape
+        period = int(rng.integers(4, 20))
+        ys, xs = np.mgrid[0:height, 0:width]
+        grid = ((ys % period < 2) | (xs % period < 2)).astype(np.float64) * rng.uniform(30, 90)
+        return np.clip(crop.astype(np.float64) * 0.7 + grid, 0, 255).astype(np.uint8)
+
+    # A mild recompression that leaves the picture essentially intact. Included because the model
+    # must not learn "any codec artifact means mosaic" from the aggressive cases above.
+    return _jpeg_roundtrip(crop, int(rng.integers(35, 60)))
 
 
 def make_sample(
@@ -164,8 +208,8 @@ def make_sample(
     rng: np.random.Generator,
     *,
     size: int = 256,
-    positive_rate: float = 0.7,
-    hard_negative_rate: float = 0.5,
+    positive_rate: float = 0.5,
+    hard_negative_rate: float = 0.7,
 ) -> tuple[np.ndarray, np.ndarray, SampleSpec]:
     """Builds one (image, mask) pair.
 

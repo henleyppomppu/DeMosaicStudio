@@ -2,10 +2,10 @@
   "experiment": "A \u2014 can the detector learn the mosaic signature from the existing corpus?",
   "device": "cuda",
   "parameters": 7762465,
-  "steps": 8000,
+  "steps": 10000,
   "batch_size": 12,
   "crop": 256,
-  "seconds": 942.6,
+  "seconds": 1067.7,
   "splits": {
     "train": [
       "tos_012.mp4",
@@ -38,115 +38,150 @@
   },
   "final": {
     "train": {
-      "iou_mean": 0.8687799717889675,
-      "iou_median": 0.9395581483840942,
-      "iou_p10": 0.7454067766666412,
-      "fp_area_mean": 0.002238154411315918,
-      "fp_area_p95": 0.019504547119140625,
-      "fp_crops_over_half_percent": 0.0703125
+      "iou_mean": 0.85101281435891,
+      "iou_median": 0.9272046387195587,
+      "iou_p10": 0.6798340678215027,
+      "fp_area_mean": 0.0020822882652282715,
+      "fp_area_p95": 0.0013275146484375,
+      "fp_crops_over_half_percent": 0.046875,
+      "clean_frames_firing": 0.03515625
     },
     "val": {
-      "iou_mean": 0.8201468207907965,
-      "iou_median": 0.9304254353046417,
-      "iou_p10": 0.49542732536792755,
-      "fp_area_mean": 0.004281222820281982,
-      "fp_area_p95": 0.030368804931640625,
-      "fp_crops_over_half_percent": 0.10546875
+      "iou_mean": 0.7883256695058662,
+      "iou_median": 0.9177599251270294,
+      "iou_p10": 0.2534484341740608,
+      "fp_area_mean": 0.001087486743927002,
+      "fp_area_p95": 0.0,
+      "fp_crops_over_half_percent": 0.03125,
+      "clean_frames_firing": 0.01953125
     }
   },
   "val_iou_by_block": {
     "13-18": {
       "n": 103,
-      "iou_mean": 0.8455
+      "iou_mean": 0.821
     },
     "19-24": {
       "n": 108,
-      "iou_mean": 0.8778
+      "iou_mean": 0.8463
     },
     "4-6": {
       "n": 52,
-      "iou_mean": 0.7479
+      "iou_mean": 0.7172
     },
     "7-12": {
       "n": 121,
-      "iou_mean": 0.8343
+      "iou_mean": 0.8128
     }
   },
   "checkpoint": "phase1-detector.pt",
   "history": [
     {
       "step": 1000,
-      "loss": 0.8071,
-      "train_iou": 0.7017,
-      "val_iou": 0.6534,
-      "val_iou_p10": 0.184,
-      "val_fp_area_mean": 0.05402,
-      "val_fp_crops_over_half_percent": 0.7578
+      "loss": 0.9538,
+      "train_iou": 0.6929,
+      "val_iou": 0.6339,
+      "val_iou_p10": 0.1229,
+      "val_fp_area_mean": 0.0267,
+      "val_fp_crops_over_half_percent": 0.5781,
+      "val_clean_frames_firing": 0.4453
     },
     {
       "step": 2000,
-      "loss": 0.5078,
-      "train_iou": 0.8132,
-      "val_iou": 0.754,
-      "val_iou_p10": 0.351,
-      "val_fp_area_mean": 0.02236,
-      "val_fp_crops_over_half_percent": 0.4219
+      "loss": 0.6853,
+      "train_iou": 0.6375,
+      "val_iou": 0.5804,
+      "val_iou_p10": 0.0,
+      "val_fp_area_mean": 0.01003,
+      "val_fp_crops_over_half_percent": 0.2578,
+      "val_clean_frames_firing": 0.1875
     },
     {
       "step": 3000,
-      "loss": 0.4502,
-      "train_iou": 0.8336,
-      "val_iou": 0.7715,
-      "val_iou_p10": 0.2809,
-      "val_fp_area_mean": 0.00707,
-      "val_fp_crops_over_half_percent": 0.1562
+      "loss": 0.6508,
+      "train_iou": 0.7772,
+      "val_iou": 0.7027,
+      "val_iou_p10": 0.0035,
+      "val_fp_area_mean": 0.0027,
+      "val_fp_crops_over_half_percent": 0.0625,
+      "val_clean_frames_firing": 0.0469
     },
     {
       "step": 4000,
-      "loss": 0.4239,
-      "train_iou": 0.8524,
-      "val_iou": 0.7842,
-      "val_iou_p10": 0.2488,
-      "val_fp_area_mean": 0.00195,
-      "val_fp_crops_over_half_percent": 0.0859
+      "loss": 0.636,
+      "train_iou": 0.8141,
+      "val_iou": 0.7423,
+      "val_iou_p10": 0.2103,
+      "val_fp_area_mean": 0.00206,
+      "val_fp_crops_over_half_percent": 0.0625,
+      "val_clean_frames_firing": 0.0469
     },
     {
       "step": 5000,
-      "loss": 0.4085,
-      "train_iou": 0.8611,
-      "val_iou": 0.8062,
-      "val_iou_p10": 0.5437,
-      "val_fp_area_mean": 0.01185,
-      "val_fp_crops_over_half_percent": 0.1953
+      "loss": 0.619,
+      "train_iou": 0.8183,
+      "val_iou": 0.7437,
+      "val_iou_p10": 0.0,
+      "val_fp_area_mean": 0.00286,
+      "val_fp_crops_over_half_percent": 0.0859,
+      "val_clean_frames_firing": 0.0625
     },
     {
       "step": 6000,
-      "loss": 0.3979,
-      "train_iou": 0.8774,
-      "val_iou": 0.8185,
-      "val_iou_p10": 0.5291,
-      "val_fp_area_mean": 0.0121,
-      "val_fp_crops_over_half_percent": 0.2266
+      "loss": 0.6023,
+      "train_iou": 0.8303,
+      "val_iou": 0.7578,
+      "val_iou_p10": 0.0,
+      "val_fp_area_mean": 0.0012,
+      "val_fp_crops_over_half_percent": 0.0469,
+      "val_clean_frames_firing": 0.0312
     },
     {
       "step": 7000,
-      "loss": 0.3956,
-      "train_iou": 0.8773,
-      "val_iou": 0.83,
-      "val_iou_p10": 0.576,
-      "val_fp_area_mean": 0.00632,
-      "val_fp_crops_over_half_percent": 0.1094
+      "loss": 0.5931,
+      "train_iou": 0.8463,
+      "val_iou": 0.7686,
+      "val_iou_p10": 0.0618,
+      "val_fp_area_mean": 0.00106,
+      "val_fp_crops_over_half_percent": 0.0234,
+      "val_clean_frames_firing": 0.0234
     },
     {
       "step": 8000,
-      "loss": 0.3827,
-      "train_iou": 0.8819,
-      "val_iou": 0.8335,
-      "val_iou_p10": 0.6134,
-      "val_fp_area_mean": 0.00778,
-      "val_fp_crops_over_half_percent": 0.1016
+      "loss": 0.5831,
+      "train_iou": 0.8481,
+      "val_iou": 0.7768,
+      "val_iou_p10": 0.0094,
+      "val_fp_area_mean": 0.00192,
+      "val_fp_crops_over_half_percent": 0.0391,
+      "val_clean_frames_firing": 0.0391
+    },
+    {
+      "step": 9000,
+      "loss": 0.5744,
+      "train_iou": 0.8643,
+      "val_iou": 0.7974,
+      "val_iou_p10": 0.4143,
+      "val_fp_area_mean": 0.00369,
+      "val_fp_crops_over_half_percent": 0.0625,
+      "val_clean_frames_firing": 0.0625
+    },
+    {
+      "step": 10000,
+      "loss": 0.5726,
+      "train_iou": 0.8637,
+      "val_iou": 0.7953,
+      "val_iou_p10": 0.2967,
+      "val_fp_area_mean": 0.00312,
+      "val_fp_crops_over_half_percent": 0.0469,
+      "val_clean_frames_firing": 0.0469
     }
   ],
+  "requirement": {
+    "source": "prd.md \u00a75.2.5a",
+    "cleanFramesFiringMax": 0.005,
+    "met": false
+  },
   "not_measured": [
     "generalisation across films \u2014 every clip comes from one source (prd.md \u00a711.2)",
     "H.264 recompression \u2014 training uses JPEG as a per-crop stand-in (\u00a711.3)",

@@ -1,0 +1,156 @@
+{
+  "experiment": "A \u2014 can the detector learn the mosaic signature from the existing corpus?",
+  "device": "cuda",
+  "parameters": 7762465,
+  "steps": 8000,
+  "batch_size": 12,
+  "crop": 256,
+  "seconds": 942.6,
+  "splits": {
+    "train": [
+      "tos_012.mp4",
+      "tos_018.mp4",
+      "tos_019.mp4",
+      "tos_011.mp4",
+      "tos_014.mp4",
+      "tos_016.mp4",
+      "tos_017.mp4",
+      "tos_020.mp4",
+      "tos_003.mp4",
+      "tos_004.mp4",
+      "tos_007.mp4",
+      "tos_013.mp4",
+      "tos_015.mp4",
+      "tos_022.mp4",
+      "tos_006.mp4",
+      "tos_008.mp4",
+      "tos_021.mp4",
+      "tos_023.mp4"
+    ],
+    "val": [
+      "tos_005.mp4",
+      "tos_009.mp4",
+      "tos_010.mp4",
+      "tos_000.mp4",
+      "tos_002.mp4",
+      "tos_001.mp4"
+    ]
+  },
+  "final": {
+    "train": {
+      "iou_mean": 0.8687799717889675,
+      "iou_median": 0.9395581483840942,
+      "iou_p10": 0.7454067766666412,
+      "fp_area_mean": 0.002238154411315918,
+      "fp_area_p95": 0.019504547119140625,
+      "fp_crops_over_half_percent": 0.0703125
+    },
+    "val": {
+      "iou_mean": 0.8201468207907965,
+      "iou_median": 0.9304254353046417,
+      "iou_p10": 0.49542732536792755,
+      "fp_area_mean": 0.004281222820281982,
+      "fp_area_p95": 0.030368804931640625,
+      "fp_crops_over_half_percent": 0.10546875
+    }
+  },
+  "val_iou_by_block": {
+    "13-18": {
+      "n": 103,
+      "iou_mean": 0.8455
+    },
+    "19-24": {
+      "n": 108,
+      "iou_mean": 0.8778
+    },
+    "4-6": {
+      "n": 52,
+      "iou_mean": 0.7479
+    },
+    "7-12": {
+      "n": 121,
+      "iou_mean": 0.8343
+    }
+  },
+  "checkpoint": "phase1-detector.pt",
+  "history": [
+    {
+      "step": 1000,
+      "loss": 0.8071,
+      "train_iou": 0.7017,
+      "val_iou": 0.6534,
+      "val_iou_p10": 0.184,
+      "val_fp_area_mean": 0.05402,
+      "val_fp_crops_over_half_percent": 0.7578
+    },
+    {
+      "step": 2000,
+      "loss": 0.5078,
+      "train_iou": 0.8132,
+      "val_iou": 0.754,
+      "val_iou_p10": 0.351,
+      "val_fp_area_mean": 0.02236,
+      "val_fp_crops_over_half_percent": 0.4219
+    },
+    {
+      "step": 3000,
+      "loss": 0.4502,
+      "train_iou": 0.8336,
+      "val_iou": 0.7715,
+      "val_iou_p10": 0.2809,
+      "val_fp_area_mean": 0.00707,
+      "val_fp_crops_over_half_percent": 0.1562
+    },
+    {
+      "step": 4000,
+      "loss": 0.4239,
+      "train_iou": 0.8524,
+      "val_iou": 0.7842,
+      "val_iou_p10": 0.2488,
+      "val_fp_area_mean": 0.00195,
+      "val_fp_crops_over_half_percent": 0.0859
+    },
+    {
+      "step": 5000,
+      "loss": 0.4085,
+      "train_iou": 0.8611,
+      "val_iou": 0.8062,
+      "val_iou_p10": 0.5437,
+      "val_fp_area_mean": 0.01185,
+      "val_fp_crops_over_half_percent": 0.1953
+    },
+    {
+      "step": 6000,
+      "loss": 0.3979,
+      "train_iou": 0.8774,
+      "val_iou": 0.8185,
+      "val_iou_p10": 0.5291,
+      "val_fp_area_mean": 0.0121,
+      "val_fp_crops_over_half_percent": 0.2266
+    },
+    {
+      "step": 7000,
+      "loss": 0.3956,
+      "train_iou": 0.8773,
+      "val_iou": 0.83,
+      "val_iou_p10": 0.576,
+      "val_fp_area_mean": 0.00632,
+      "val_fp_crops_over_half_percent": 0.1094
+    },
+    {
+      "step": 8000,
+      "loss": 0.3827,
+      "train_iou": 0.8819,
+      "val_iou": 0.8335,
+      "val_iou_p10": 0.6134,
+      "val_fp_area_mean": 0.00778,
+      "val_fp_crops_over_half_percent": 0.1016
+    }
+  ],
+  "not_measured": [
+    "generalisation across films \u2014 every clip comes from one source (prd.md \u00a711.2)",
+    "H.264 recompression \u2014 training uses JPEG as a per-crop stand-in (\u00a711.3)",
+    "real mosaics \u2014 all positives are synthetic, which is what makes the mask exact",
+    "the \u00a75.2.5a false-positive rate proper, which needs the collected negatives corpus"
+  ]
+}

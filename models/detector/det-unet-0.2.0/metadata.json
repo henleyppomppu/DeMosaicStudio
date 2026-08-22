@@ -1,0 +1,43 @@
+{
+  "id": "det-unet",
+  "version": "0.2.0",
+  "task": "mosaic-segmentation",
+  "sha256": "c5d044c84d37efe6a0932f3a5f08fe881434e1691753fdd70aa5192f7782bdb5",
+  "architecture": {
+    "type": "MosaicUNet",
+    "width": 32,
+    "parameters": 7762465
+  },
+  "input": {
+    "channels": 1,
+    "range": [
+      0.0,
+      1.0
+    ],
+    "sizeMultiple": 16,
+    "inferenceShortSide": 512,
+    "tile": 512,
+    "tileOverlap": 64
+  },
+  "output": {
+    "channels": 1,
+    "activation": "sigmoid",
+    "semantics": "P(pixel is mosaicked)"
+  },
+  "precision": "fp32",
+  "runtimes": [
+    "pytorch-cuda",
+    "pytorch-cpu"
+  ],
+  "trainedOn": "clean-tos (24 clips, 96 s, Tears of Steel CC BY 3.0), synthetic positives, 50% negatives of which 70% manufactured hard negatives",
+  "training": {
+    "steps": 10000,
+    "report": "docs/phase1-detector-report.md",
+    "valIoU": 0.7883,
+    "valCleanFramesFiring": 0.0195,
+    "valFalsePositiveArea": 0.00109
+  },
+  "license": "in-house; no third-party weights (D-03)",
+  "changeFrom": "0.1.0",
+  "notes": "Retrained after the first end-to-end run found nine regions in a clip containing one and a threshold sweep showed no operating point could fix it. Negative rate raised to 50% and the hard-negative classes widened. Trades ~0.03 val IoU for a 4x lower false-positive area. STILL DOES NOT MEET prd.md \u00a75.2.5a and has never seen real mosaicked footage."
+}

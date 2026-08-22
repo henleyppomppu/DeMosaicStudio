@@ -332,3 +332,32 @@ costs quality in the one band where multi-frame works at all.
 the transform and the muxer. It is the correct fix and is recorded as a next step rather than done.
 
 **Date:** 2026-08-22.
+
+---
+
+## D-20 — The detector's operating point is measured on video, and the requirement is frame-level
+
+**Decided.** Two things, both prompted by the first end-to-end run finding 843 regions in a clip
+containing one.
+
+**The threshold is calibrated, not chosen.** `scripts/calibrate_detector.py` sweeps it against video
+with a known ground-truth mask and reports precision, recall, regions per frame, and the rate at
+which clean frames fire. §5.2.3's default of 0.45 had never been calibrated against anything.
+
+**The training metric is `clean_frames_firing`, not a crop-area proxy.** §5.2.5a is a frame-level
+requirement — at most 0.5% of negative frames may produce any region — and the crop-level proxy used
+for v0.1.0 read a comfortable 10.6% while the real quantity was 37x over the bar. A proxy that
+comfortable is worse than no proxy, because it stops the search.
+
+**Consequence.** The sweep showed **no threshold** could satisfy §5.2.5a on v0.1.0, which is what
+turned "tune the operating point" into "retrain the model" (§8 of the detector report). Widening the
+negatives then halved the video-level rate, 18.8% to 9.4%, at a cost of 0.032 val IoU — outside the
+0.005 noise floor, so a real cost knowingly accepted.
+
+**Note.** `clean_frames_firing` is trivially satisfied by a model that predicts nothing; a 300-step
+smoke run scored 0.39% against the 0.5% bar while its IoU was zero. It is only meaningful read
+alongside IoU, and the evaluation reports both for that reason.
+
+**Reversal cost: Low.** A metric and a script.
+
+**Date:** 2026-08-22.

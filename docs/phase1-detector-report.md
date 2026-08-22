@@ -2,6 +2,10 @@
 
 **Run 2026-08-22. Answer: yes, and the corpus is not the current limit. Negatives are.**
 
+**Update, same day (§8): the negatives were widened and the model retrained as v0.2.0.** It halved
+the false-positive rate on video — 18.8% of clean frames firing down to 9.4% — and still misses
+§5.2.5a by 19x. What is left needs collected negatives, not manufactured ones.
+
 Raw data: `docs/phase1-detector.json`. Script: `training/train_detector.py`.
 
 ---
@@ -169,3 +173,91 @@ network.
 4. **Sweep the detection threshold** and pick an operating point from the precision/recall curve
    rather than inheriting 0.45 from the PRD.
 5. Only then consider more clean hours, and only if measurement says so.
+
+
+---
+
+## 8. v0.2.0 — widening the negatives
+
+Prompted by the first end-to-end run (`docs/phase3-endtoend-report.md`), which found 843 regions in
+a clip containing one.
+
+### 8.1 The threshold could not fix it
+
+`scripts/calibrate_detector.py` sweeps the operating point against video with a known ground-truth
+mask. §5 of this report had recorded that §5.2.3's default of 0.45 was never calibrated; this is that
+calibration, on **v0.1.0**:
+
+| threshold | precision | recall | IoU | regions/frame | clean frames firing |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 0.45 | 0.589 | 0.793 | 0.510 | 5.88 | 75.0% |
+| 0.50 | 0.618 | 0.787 | 0.530 | 5.88 | 75.0% |
+| 0.90 | 0.850 | 0.760 | 0.670 | 2.56 | 40.6% |
+| 0.99 | 0.938 | 0.721 | 0.688 | 1.41 | **18.8%** |
+
+**No threshold meets §5.2.5a**, whose bar is 0.5% of negative frames producing any region. The best
+available point is 37x over it. That settles it as a model problem rather than an operating-point
+problem, which is what justified retraining rather than tuning.
+
+### 8.2 What changed
+
+Negative rate 30% → **50%**, and of those 50% → **70%** manufactured hard negatives. The classes went
+from three to six: severe JPEG blocking (now down to quality 2, since JPEG works on 8x8 blocks and is
+the closest thing to a small-block mosaic that is not one), aggressive downscale/upscale, heavy
+grain, **defocus**, **genuinely periodic content** (tiling, mesh, blinds — a detector that has never
+seen periodic structure calls all of it mosaic), and a **mild** recompression so the model does not
+learn "any codec artifact means mosaic" from the aggressive cases.
+
+Training also gained the metric that matters: **`clean_frames_firing`**, the frame-level rate §5.2.5a
+actually specifies. The crop-level area proxy used for v0.1.0 read 10.6% while the real quantity was
+37x over the bar — a proxy that comfortable is worse than no proxy.
+
+### 8.3 Result
+
+| | v0.1.0 | **v0.2.0** |
+| --- | ---: | ---: |
+| val IoU | 0.820 | **0.788** |
+| val false-positive area | 0.0043 | **0.0011** |
+| val clean frames firing (crops) | not measured | 1.95% |
+| **clean frames firing on video @0.99** | 18.8% | **9.4%** |
+| precision @0.99 | 0.938 | 0.947 |
+| regions/frame @0.99 | 1.41 | 1.44 |
+
+The IoU drop of 0.032 is well outside the §3.1 noise floor of 0.005, so it is a real cost, not a
+wobble. **The trade was worth taking**: a 0.03 IoU loss for halving the failure that damages clean
+footage.
+
+**And it is still 19x over the requirement.** The manufacturable half of the negatives corpus is now
+spent. What remains is the half §11.4 says must be collected — real defocus and bokeh, real pixel
+art, real LED walls and mesh fabric — because a synthetic approximation of those teaches the detector
+precisely the wrong boundary.
+
+### 8.4 The recall ceiling is not what it looked like
+
+Region recall sat at exactly 0.750 at **every** threshold and **every** block size, before and after
+retraining. Two hypotheses, both wrong:
+
+* *Small blocks are hardest.* §3.2 measured that at crop level, so it was the obvious guess. But
+  recall was 0.750 at block 5, 10 **and** 18 — identical.
+* *The failing clip is flat, so the mosaic changes nothing.* Its region standard deviation is 36.6,
+  in line with the clips that detect fine (35.2, 31.7).
+
+What it actually is: **one clip of four fails, and it is the one where the mosaic altered the least
+of the region.** Meaningfully-changed pixels (>4 levels) were 10.3% there against 39-55% elsewhere,
+while the *mean* change was ordinary. So the region is one whose content largely survives block
+averaging, and the periodic structure a detector keys on is correspondingly weak.
+
+Whether that miss is a failure or correct behaviour is genuinely unclear, and worth deciding rather
+than assuming: a region the mosaic barely altered is also a region there is little point restoring.
+
+**One failing clip out of four is a sample of one.** This explanation fits the data available and
+has not been tested on anything else.
+
+## 9. Limitations added in v0.2.0
+
+- The calibration set is **4 clips x 8 frames from one film**, with a synthetic elliptical mosaic at
+  three block sizes. The 9.4% figure has that much behind it and no more.
+- **The new hard negatives are still manufactured.** Defocus is a box filter, not a lens; the
+  periodic-content class is a drawn grid, not an LED wall. §11.4 is explicit that these particular
+  categories have to be collected, and this run is the evidence for why.
+- v0.2.0 has still **never seen real mosaicked footage**.

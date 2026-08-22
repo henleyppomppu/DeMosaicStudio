@@ -1,0 +1,121 @@
+{
+  "model": {
+    "id": "det-unet",
+    "version": "0.1.0"
+  },
+  "positives": 32,
+  "negatives": 32,
+  "blocks": [
+    5,
+    10,
+    18
+  ],
+  "minArea": 1024,
+  "points": [
+    {
+      "threshold": 0.3,
+      "precision": 0.4965,
+      "recall": 0.7987,
+      "iou": 0.4413,
+      "regions_per_frame": 6.62,
+      "region_recall": 0.75,
+      "clean_fp_area": 0.03046,
+      "clean_frames_firing": 0.75
+    },
+    {
+      "threshold": 0.4,
+      "precision": 0.5602,
+      "recall": 0.795,
+      "iou": 0.4894,
+      "regions_per_frame": 6.12,
+      "region_recall": 0.75,
+      "clean_fp_area": 0.02373,
+      "clean_frames_firing": 0.75
+    },
+    {
+      "threshold": 0.45,
+      "precision": 0.5891,
+      "recall": 0.7927,
+      "iou": 0.5105,
+      "regions_per_frame": 5.88,
+      "region_recall": 0.75,
+      "clean_fp_area": 0.02101,
+      "clean_frames_firing": 0.75
+    },
+    {
+      "threshold": 0.5,
+      "precision": 0.6182,
+      "recall": 0.7869,
+      "iou": 0.5296,
+      "regions_per_frame": 5.88,
+      "region_recall": 0.75,
+      "clean_fp_area": 0.01843,
+      "clean_frames_firing": 0.75
+    },
+    {
+      "threshold": 0.6,
+      "precision": 0.6679,
+      "recall": 0.7802,
+      "iou": 0.5621,
+      "regions_per_frame": 5.22,
+      "region_recall": 0.75,
+      "clean_fp_area": 0.01484,
+      "clean_frames_firing": 0.7188
+    },
+    {
+      "threshold": 0.7,
+      "precision": 0.715,
+      "recall": 0.775,
+      "iou": 0.5921,
+      "regions_per_frame": 4.47,
+      "region_recall": 0.75,
+      "clean_fp_area": 0.01193,
+      "clean_frames_firing": 0.7188
+    },
+    {
+      "threshold": 0.8,
+      "precision": 0.7747,
+      "recall": 0.7692,
+      "iou": 0.6286,
+      "regions_per_frame": 3.62,
+      "region_recall": 0.75,
+      "clean_fp_area": 0.00876,
+      "clean_frames_firing": 0.6875
+    },
+    {
+      "threshold": 0.9,
+      "precision": 0.8498,
+      "recall": 0.7604,
+      "iou": 0.6703,
+      "regions_per_frame": 2.56,
+      "region_recall": 0.75,
+      "clean_fp_area": 0.00506,
+      "clean_frames_firing": 0.4062
+    },
+    {
+      "threshold": 0.95,
+      "precision": 0.8977,
+      "recall": 0.751,
+      "iou": 0.6918,
+      "regions_per_frame": 1.91,
+      "region_recall": 0.75,
+      "clean_fp_area": 0.00302,
+      "clean_frames_firing": 0.25
+    },
+    {
+      "threshold": 0.99,
+      "precision": 0.9381,
+      "recall": 0.7207,
+      "iou": 0.688,
+      "regions_per_frame": 1.41,
+      "region_recall": 0.75,
+      "clean_fp_area": 0.00161,
+      "clean_frames_firing": 0.1875
+    }
+  ],
+  "requirement": {
+    "source": "prd.md \u00a75.2.5a",
+    "cleanFramesFiringMax": 0.005,
+    "note": "at most 0.5% of negative frames may produce any region"
+  }
+}

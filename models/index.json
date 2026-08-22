@@ -8,6 +8,13 @@
       "task": "mosaic-segmentation",
       "path": "detector/det-unet-0.1.0",
       "sha256": "81317042f7477b12f87735ecae32a447aa7df55fea8129ce557a988084e8839a"
+    },
+    {
+      "id": "det-unet",
+      "version": "0.2.0",
+      "task": "mosaic-segmentation",
+      "path": "detector/det-unet-0.2.0",
+      "sha256": "c5d044c84d37efe6a0932f3a5f08fe881434e1691753fdd70aa5192f7782bdb5"
     }
   ]
 }

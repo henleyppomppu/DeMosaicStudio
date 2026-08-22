@@ -44,6 +44,13 @@ REPO = Path(__file__).resolve().parent.parent
 CORPUS = REPO / "training" / "datasets" / "clean"
 MANIFEST = REPO / "training" / "datasets" / "clean-tos.manifest.json"
 
+#: A crop "fires" when it marks at least this many pixels — the same floor the pipeline applies
+#: before a region becomes a restoration (§5.2.3 min_region_area).
+MIN_REGION_PIXELS = 1024
+
+#: prd.md §5.2.5a: at most this fraction of negative frames may produce any region.
+FRAME_FIRING_BAR = 0.005
+
 
 @torch.no_grad()
 def evaluate_by_block(
@@ -123,15 +130,25 @@ def evaluate(
         ious.extend(mask_iou(model(x), y).cpu().tolist())
 
     false_positives: list[float] = []
+    fires: list[bool] = []
     for _ in range(batches):
-        images, masks = make_batch(clips, rng, batch_size, positive_rate=0.0, hard_negative_rate=0.5)
+        images, masks = make_batch(clips, rng, batch_size, positive_rate=0.0, hard_negative_rate=0.7)
         x = torch.from_numpy(images).to(device)
         y = torch.from_numpy(masks).to(device)
-        false_positives.extend(false_positive_area(model(x), y).cpu().tolist())
+        logits = model(x)
+        false_positives.extend(false_positive_area(logits, y).cpu().tolist())
+
+        # prd.md §5.2.5a is a *frame-level* requirement: at most 0.5% of negative frames may produce
+        # any region at all. The crop-level area proxy used earlier passed while the real thing was
+        # 37x over the bar, so this measures the requirement rather than something near it.
+        predicted = (torch.sigmoid(logits) > 0.5).float()
+        per_sample = predicted.sum(dim=(1, 2, 3)).cpu().numpy()
+        fires.extend((per_sample > MIN_REGION_PIXELS).tolist())
 
     model.train()
 
     fp = np.asarray(false_positives)
+    fired = np.asarray(fires, dtype=bool)
 
     return {
         "iou_mean": float(np.mean(ious)),
@@ -140,6 +157,7 @@ def evaluate(
         "fp_area_mean": float(fp.mean()),
         "fp_area_p95": float(np.percentile(fp, 95)),
         "fp_crops_over_half_percent": float((fp > 0.005).mean()),
+        "clean_frames_firing": float(fired.mean()),
     }
 
 
@@ -212,6 +230,7 @@ def main(argv: list[str] | None = None) -> int:
                 "val_fp_crops_over_half_percent": round(
                     val_metrics["fp_crops_over_half_percent"], 4
                 ),
+                "val_clean_frames_firing": round(val_metrics["clean_frames_firing"], 4),
             }
             history.append(entry)
             running = 0.0
@@ -248,6 +267,11 @@ def main(argv: list[str] | None = None) -> int:
         "val_iou_by_block": by_block,
         "checkpoint": checkpoint.name,
         "history": history,
+        "requirement": {
+            "source": "prd.md §5.2.5a",
+            "cleanFramesFiringMax": FRAME_FIRING_BAR,
+            "met": final_val["clean_frames_firing"] <= FRAME_FIRING_BAR,
+        },
         "not_measured": [
             "generalisation across films — every clip comes from one source (prd.md §11.2)",
             "H.264 recompression — training uses JPEG as a per-crop stand-in (§11.3)",
@@ -263,6 +287,10 @@ def main(argv: list[str] | None = None) -> int:
     print(f"val IoU p10 {final_val['iou_p10']:.3f}   (the worst tenth of crops)")
     print(f"val FP area {final_val['fp_area_mean']:.4f} mean, {final_val['fp_area_p95']:.4f} p95")
     print(f"val clean crops marking >0.5% of area: {final_val['fp_crops_over_half_percent']:.1%}")
+    print(
+        f"val clean frames firing at all:        {final_val['clean_frames_firing']:.2%}  "
+        f"(prd.md §5.2.5a bar: {FRAME_FIRING_BAR:.1%})"
+    )
     print()
     print("val IoU by block size:")
     for key, stats in by_block.items():
