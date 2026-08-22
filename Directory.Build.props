@@ -1,0 +1,27 @@
+<Project>
+
+  <!-- Shared settings for every C# project. See prd.md §4.3, §4.4. -->
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <WarningLevel>9999</WarningLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <Deterministic>true</Deterministic>
+    <NeutralLanguage>en</NeutralLanguage>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+
+  <!--
+    prd.md §4.3: App targets net10.0-windows and must never be referenced by a test project that has
+    to run on Linux CI. Everything testable belongs in Domain.
+  -->
+  <PropertyGroup Condition="'$(MSBuildProjectName)' != 'DeMosaicStudio.App'">
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+
+</Project>

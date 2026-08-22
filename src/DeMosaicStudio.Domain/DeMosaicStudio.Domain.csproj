@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    prd.md §4.3: Domain has no project references and no I/O.
+    Anything testable without a GPU or a file system belongs here.
+  -->
+  <PropertyGroup>
+    <RootNamespace>DeMosaicStudio.Domain</RootNamespace>
+  </PropertyGroup>
+
+</Project>

@@ -1,0 +1,45 @@
+{
+  "_comment": "prd.md §9.3 / §13.4. Locks DeMosaicStudio.Domain.Jobs.SettingsFingerprint to worker/demosaic_worker/fingerprints.py. Both sides must produce the same canonical text and the same digest for the same settings, or a resume computed by one and checked by the other would discard work that is actually valid.",
+  "cases": [
+    {
+      "name": "defaults",
+      "settings": {
+        "detection": {
+          "confidence": 0.45,
+          "nmsIou": 0.5,
+          "minRegionArea": 256,
+          "maskThreshold": 0.5,
+          "minConfirmFrames": 2,
+          "maxMissingFrames": 3
+        },
+        "restoration": {
+          "preset": "Balanced",
+          "paddingRatio": 0.15,
+          "temporalWindow": "auto",
+          "alignConfMin": 0.35,
+          "minRestorationConfidence": 0.0,
+          "featherWidth": 3
+        },
+        "encode": {
+          "profile": "QualityX265",
+          "codec": "H265",
+          "constantQuality": 18
+        }
+      },
+      "expected": {
+        "detection": {
+          "canonical": "confidence=0.4500\nmaskThreshold=0.5000\nmaxMissingFrames=3\nminConfirmFrames=2\nminRegionArea=256\nnmsIou=0.5000",
+          "digest": "sha256:ace599dc1ac233873bddee9ea1f3ddef3719ee49c04147cdd9d72fd165e62d68"
+        },
+        "restoration": {
+          "canonical": "alignConfMin=0.3500\nfeatherWidth=3\nminRestorationConfidence=0.0000\npaddingRatio=0.1500\npreset=Balanced\ntemporalWindow=auto",
+          "digest": "sha256:269ca6f35cdcd012d194f2938414fe2f039107e42d539a9d3186af45749d1151"
+        },
+        "encode": {
+          "canonical": "codec=H265\nconstantQuality=18\nprofile=QualityX265",
+          "digest": "sha256:192c660a6c0367327e2fea4e7c48b6baabc0041cb41aed715c6302332f9d7273"
+        }
+      }
+    }
+  ]
+}

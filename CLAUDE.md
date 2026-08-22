@@ -1,0 +1,261 @@
+# DeMosaic Studio — 작업 인계 문서
+
+Claude Code가 이 저장소에서 작업을 이어갈 때 **가장 먼저 읽는 문서**입니다.
+저장소에 이미 있는 내용은 반복하지 않고 링크만 겁니다. 여기 적는 것은 **코드를 읽어서는 알 수
+없는 것들** — 무엇이 실제로 검증됐고 무엇이 아닌지, 실기에서 무엇이 깨졌고 왜 그렇게 고쳤는지.
+
+| 먼저 볼 곳 | 내용 |
+| --- | --- |
+| [`prd.md`](prd.md) | 단일 진실 공급원 (v3.3). 이 문서와 충돌하면 PRD가 이긴다 |
+| [`prompt.md`](prompt.md) | 실행 프롬프트. 페이즈 분해와 에이전트 배치 |
+| [`docs/DECISIONS.md`](docs/DECISIONS.md) | ADR 17건. **되돌리기 전에 반드시 확인** |
+| [`docs/ERROR_CODES.md`](docs/ERROR_CODES.md) | 오류 코드 43개 |
+| [`docs/WORKER_PROTOCOL.md`](docs/WORKER_PROTOCOL.md) | 프로토콜 v1.0 |
+| [`docs/phase0-report.md`](docs/phase0-report.md) | **실현 가능성 게이트 — `PASS_ALIGNMENT_BLOCKED`** |
+| [`docs/phase1-detector-report.md`](docs/phase1-detector-report.md) | **실험 A — 탐지기가 신호를 학습하는가: 예 (val IoU 0.82)** |
+| [`docs/phase2-alignment-report.md`](docs/phase2-alignment-report.md) | **밀집 정렬 — 간극의 19%만 메움. 나머지는 정렬 문제가 아님** |
+
+---
+
+## 1. 지금 상태 (2026-08-22)
+
+**Phase 0 완료 — 게이트 판정 `PASS_ALIGNMENT_BLOCKED`.** 0.5만 부분 완료.
+**Phase 1 실험 A 완료 — 탐지기가 신호를 학습합니다 (held-out val IoU 0.820).**
+**Phase 2 정렬 실험 완료 — 밀집 흐름이 간극의 19%만 메웁니다. 나머지는 정렬 문제가 아닙니다.**
+
+### 게이트 결과 (`docs/phase0-report.md`, 576측정)
+
+| | |
+| --- | --- |
+| 결정 대역(SCREEN, 블록 6~12) oracle 이득 | **+3.298 dB** |
+| 같은 대역 estimated(전역 평행이동) 이득 | **−0.861 dB** |
+| 노이즈 바닥 | **0.000 dB** (x264가 이 설정에서 결정론적 → 위 차이는 전부 실제) |
+| OBJECT 앵커링 oracle 이득 | **−0.79 ~ −1.50 dB** (전 블록 크기에서 음수) |
+
+**결론 세 줄.**
+1. 정보는 이웃 프레임에 **있다.** §1.4의 전제는 성립하고 Phase 2는 죽지 않았다.
+2. **정렬이 임계 경로다.** +3.30과 −0.86의 간극이 다중 프레임 아키텍처의 이득 전부다.
+   복원 모델이 아니라 §5.7이 Phase 2의 첫 작업이다.
+3. **객체 추종 격자는 융합하면 손해다.** 안 하느니만 못하다 — §5.4.4 앵커링 판정이
+   진단용이 아니라 필수 안전장치다.
+
+### 실제로 실행해서 확인된 것
+
+```
+dotnet build DeMosaicStudio.slnx -c Release   경고 0 / 오류 0
+dotnet test  DeMosaicStudio.slnx -c Release   88 통과
+.venv\Scripts\python.exe -m pytest            134 통과
+scripts\check-environment.ps1                 7/7 PASS, exit 0
+```
+
+- **환경 구축 완료.** Python 3.12.10, GPL FFmpeg(x264/x265/NVENC), PyAV 14.0.1, numpy.
+  `scripts/setup-worker.ps1`이 재현하고 두 번째 실행에서 아무것도 다시 받지 않는 것까지 확인.
+- **교차 언어 패리티 양방향 검증.** 오류 코드 43개, 지문 정규 텍스트·다이제스트, `PROTOCOL_VERSION`.
+- **task 0.4 패스스루 PoC.** CFR·VFR 타임라인 보존, 오디오 3트랙 비트 동일, 손상 파일 E2003.
+- **클린 코퍼스.** Tears of Steel(CC BY 3.0) 24클립, 모션 실측 층화(static 5 / slow 8 /
+  medium 7 / fast 4). 클립은 gitignore, 매니페스트+SOURCES.md만 추적 — URL·해시·빌드 명령으로 재현.
+
+### 실험 A 결과 (`docs/phase1-detector-report.md`)
+
+| | |
+| --- | --- |
+| held-out val IoU | **0.820** (train 0.869 — 과적합 거의 없음) |
+| 블록 4~6px / 19~24px IoU | **0.748 / 0.878** — 작을수록 어렵다 |
+| 클린 크롭이 면적 0.5% 초과 오탐 | **10.6%** (§5.2.5a는 0.5% 요구) |
+| **학습 노이즈 바닥** | val IoU **±0.005**, p10 **±0.021**, FP율 **±1.2pp** (동일 설정 2회) |
+
+**요지 두 줄.**
+1. 아키텍처(D-03)는 96초 코퍼스로도 신호를 학습합니다. **지금 병목은 클린 영상 시간이 아닙니다.**
+2. **거짓 양성이 병목입니다.** 그리고 실패는 **작은 블록(4~6px)** 에 몰려 있습니다 — 옅은 모자이크와
+   평범한 압축 소프트닝이 거의 같은 신호라서. 복원은 정확히 반대로 큰 블록에서 어렵습니다.
+
+### 정렬 실험 결과 (`docs/phase2-alignment-report.md`, 64측정)
+
+| 팔 | single 대비 |
+| --- | ---: |
+| 전역 평행이동 (게이트 수치) | −2.110 dB |
+| **밀집 흐름 K=5** | **−0.791 dB** |
+| **밀집 흐름 K=3** | **−0.443 dB** |
+| oracle (완벽한 정렬) | +3.494 dB |
+
+정렬 자체는 크게 좋아졌습니다 — 잔차 12.54 → 5.77(전역) → **3.91**(밀집). 그런데 이득은 여전히 음수.
+
+**모션 대역이 답을 줍니다.**
+
+| 대역 | oracle | 밀집 K=3 | 정렬 후 잔차 |
+| --- | ---: | ---: | ---: |
+| fast | +3.70 | −1.48 | 7.01 |
+| medium | +4.40 | −0.64 | 3.95 |
+| **slow** | +3.22 | **+0.39** | 3.43 |
+| static | +2.66 | −0.04 | **1.27** |
+
+**`static`은 정렬이 제일 좋은데(잔차 1.27) 이득이 없습니다.** 어긋난 게 없고 새 정보가 없는 겁니다 —
+정지 피사체는 매 프레임 같은 블록에 들어갑니다. 그리고 oracle이 그 정지 클립에서 +2.66을 내는 건
+**실제 영상에 없는 위상 다양성을 합성으로 만들어냈기 때문**입니다. oracle은 낙관적 상한 정도가
+아니라 정지 콘텐츠에서는 존재할 수 없는 것을 재고 있습니다.
+
+**`slow`만 이득이 나고, 게이트와 이 실험이 독립적으로 일치합니다**(+0.32 / +0.36).
+그리고 **K=3이 모든 대역에서 K=5 이상**입니다 — 한계가 흐름 정확도가 아니라 **내용 대응**이라는 뜻.
+
+### 존재하지 않는 것
+
+복원 모델·파이프라인·WPF 앱 없음. **네거티브 코퍼스 없음**(이게 다음 병목).
+탐지기 체크포인트 `docs/phase1-detector.pt`는 **실험 산출물이지 모델 릴리스가 아닙니다** —
+`metadata.json`도 버전도 §14.1 모델 스토어 등록도 없습니다.
+
+열화 생성기는 §11.3 랜덤화 매트릭스(CRF 사다리 재압축·크로마 서브샘플링·모션 블러·다중 ROI)가
+미완입니다.
+
+### 게이트가 측정하지 **않은** 것
+
+- **LPIPS와 워핑 오차.** §1.4.3은 PSNR·LPIPS·워핑을 함께 보라고 하는데 셋 중 하나만 쟀습니다.
+  LPIPS는 사전학습 네트워크가 필요해 Phase 2에 옵니다. **그때 게이트를 다시 돌리세요.**
+- 학습 모델, GPU 경로, 실제 모자이크 영상.
+- oracle 팔은 **후한 상한**입니다 — 이웃을 타깃에서 합성하므로 내용이 완전히 동일합니다.
+  실제 이웃에는 가림·독립 물체 운동·조명 변화가 있어 어떤 정렬로도 증거가 되지 않습니다.
+
+## 2. 검증 명령
+
+```powershell
+dotnet build DeMosaicStudio.slnx -c Release   # 경고 0 유지
+dotnet test  DeMosaicStudio.slnx -c Release   # 현재 87/87
+.\.venv\Scripts\python.exe -m pytest        # 현재 166/166 (약 42초)
+.\scripts\check-environment.ps1              # 현재 7/7
+```
+
+솔루션 파일은 `.slnx`입니다(.NET 10 기본). `dotnet build DeMosaicStudio.sln`은 파일이 없다고 죽습니다.
+`python`은 Microsoft Store 스텁이라 **반드시 `.venv\Scripts\python.exe`를 쓰세요.**
+미디어 픽스처를 다시 만들려면 `.venv\Scripts\python.exe scripts\make_fixtures.py`.
+
+**"통과"를 "검증됨"으로 착각하지 마세요.** 254개(C# 88 + Python 166) 중 실제 미디어·GPU를
+건드리는 것은 일부뿐이고, **실제 모자이크 영상은 아직 한 번도 시험되지 않았습니다.**
+
+게이트를 다시 돌리려면(약 20분):
+`.\.venv\Scripts\python.exe scripts\eval_multiframe_gate.py --clips 12 --targets 3`
+
+---
+
+## 3. 실기 환경 (2026-08-22 실측)
+
+| 항목 | 값 |
+| --- | --- |
+| PC | Windows 11 Pro, 한국어 로캘(**CP949**), **PowerShell 5.1** |
+| GPU | RTX 3080 Ti 12GB, 드라이버 591.86 |
+| .NET SDK | 10.0.302 (**유일**. .NET 8 없음 → D-02의 근거) |
+| Python | 3.12.10 (`.venv`). **`python`은 Store 스텁이므로 `.venv\Scripts\python.exe`를 쓰세요** |
+| FFmpeg | `tools/ffmpeg` — GPL, x264/x265/NVENC |
+| 소스 | `D:\Workspace\DeMosaicStudio` |
+
+`CP949 + PowerShell 5.1`이 아래 함정들의 원인입니다. `pwsh` 7로 검증하면 전부 통과하는데
+실기에서 깨집니다.
+
+---
+
+## 4. 이번 세션에서 실제로 밟은 것
+
+기록으로 남깁니다. 전부 다시 밟기 쉬운 것들입니다.
+
+1. **`dotnet new sln`이 `.slnx`를 만듭니다** (.NET 10). `DeMosaicStudio.sln`으로 빌드하면
+   `MSB1009: 프로젝트 파일이 없습니다`가 납니다. 이 문서와 `prompt.md`의 명령을 `.slnx`로
+   맞춰 뒀습니다.
+2. **`CA1720`로 빌드가 깨졌습니다.** `enum GridAnchor { Screen, Object, Unknown }`의 `Object`가
+   형식 이름과 겹칩니다. `TreatWarningsAsErrors=true`라 경고가 아니라 오류입니다.
+   → `ObjectTracked`로 개명. 프로토콜 와이어 값은 여전히 `OBJECT`입니다.
+3. **`.ps1`의 `§` 문자가 콘솔에서 깨집니다.** 파일은 UTF-8 BOM이라 **파싱은 정상**인데,
+   `Write-Host`가 CP949 콘솔로 출력하면서 `§4.5`가 `��4.5`로 나옵니다. 파일 인코딩 문제가
+   아니라 출력 인코딩 문제입니다. → 콘솔에 찍는 문자열은 ASCII만 쓰도록 바꿨습니다
+   (`prd.md section 4.5`). 주석·문서 문자열의 `§`는 그대로 둬도 됩니다.
+4. **테스트 프로젝트에 `CA1707`이 걸립니다.** 테스트 메서드 이름의 밑줄 때문입니다.
+   → `tests/Directory.Build.props`에서 억제. 이 파일은 루트 `Directory.Build.props`를
+   `GetPathOfFileAbove`로 명시적으로 import해야 합니다 — 안 그러면 루트 설정이 통째로 무시됩니다.
+5. **`worker/tests/__init__.py`와 `training/tests/__init__.py`가 충돌합니다.** 둘 다 `tests`
+   라는 이름의 패키지가 되어 `ModuleNotFoundError: No module named 'tests.test_mosaic'`가 납니다.
+   → 양쪽 `__init__.py`를 지웠습니다. pytest가 rootdir 기준으로 모듈명을 만들면 파일명만 겹치지
+   않으면 됩니다.
+6. **`av` 컨테이너의 `seek(0)`은 되감기가 아닙니다.** 가장 가까운 키프레임으로 이동하면서
+   코덱 프리롤(AAC priming 패킷)을 흘립니다. 오디오 스트림 해시를 seek 후에 계산했더니 원본과
+   출력이 달라 보였고, **실제로는 비트 동일**이었습니다. → 스트림마다 컨테이너를 새로 여세요.
+7. **PyAV는 자체 FFmpeg를 번들하는데 NVENC가 없습니다.** `libx264`/`libx265`는 있고
+   `h264_nvenc`/`hevc_nvenc`는 없습니다. Quality 프로파일(x265)은 in-process로 되지만
+   **Speed 프로파일(NVENC)은 `tools/ffmpeg`를 서브프로세스로 불러야 합니다.** D-08과 §5.1.4의
+   전제와 다릅니다.
+8. **파이썬 `sys.stdout.encoding`이 `cp949`입니다.** 프로토콜은 UTF-8 JSON Lines라 그대로 두면
+   비ASCII 로그 한 줄에 `UnicodeEncodeError`가 납니다. → `demosaic_worker/stdio.py`의
+   `configure_stdio_utf8()`를 핸드셰이크 전에 호출하세요. 가드: `test_stdio.py`가 실제
+   서브프로세스로 한글·일본어를 왕복시킵니다. **UTF-8 로캘 CI에서는 절대 안 잡히는 종류입니다.**
+
+---
+
+## 5. 반드시 지켜야 할 함정
+
+각 항목에 가드 테스트가 있습니다. **지우거나 완화하지 마세요.**
+
+### 5.1 `.ps1`·`.iss`는 UTF-8 **BOM**으로 저장
+PowerShell 5.1은 BOM이 없으면 ANSI(CP949)로 읽습니다. CP949 선행 바이트가 다음 1바이트를
+삼키는데 UTF-8 한글은 3바이트라 정렬이 밀리고, 결국 **실행이 아니라 파싱에서** 실패합니다.
+`pwsh` 7은 BOM 없는 UTF-8을 잘 읽으므로 문법 검사로는 절대 안 잡힙니다.
+→ 가드: `ScriptEncodingTests` (바이트 직접 검사, 글로브라 새 스크립트 자동 포함)
+
+### 5.2 파이프라인 결과는 `@()`로 **전체**를 감쌀 것
+```powershell
+$x = @($obj.items) | Where-Object { $_ }    # 틀림 — 비면 $null, $null.Count 는 오류
+$x = @(@($obj.items) | Where-Object { $_ }) # 맞음
+```
+`check-environment.ps1`이 이 규칙을 지키고 있습니다. 손댈 때 깨뜨리지 마세요.
+
+### 5.3 지문에 키를 넣고 빼는 것은 항상 전체 캐시 무효화
+`prd.md` §9.3. 지문 비교가 dict 상등이라 키 하나만 늘어도 기존 체크포인트가 전부 불일치가
+됩니다. 지금은 체크포인트가 존재하지 않으므로 공짜지만, Phase 3 이후로는 아닙니다.
+→ 가드: `SettingsFingerprintTests.Every_fingerprinted_setting_appears_in_its_canonical_form`
+
+### 5.4 성능 손잡이는 지문에서 제외
+`computeType`/precision은 OOM 사다리가 **실행 중에** 바꿉니다. 지문에 넣으면 다운그레이드
+이후 모든 이어하기가 "설정 바뀜"이 되어 방금 끝낸 작업을 다시 돌립니다.
+→ 가드: `Performance_knobs_discard_nothing`
+
+### 5.5 C#/Python 패리티
+오류 코드와 설정 지문은 두 언어 구현이 갈라지지 않도록 `fixtures/parity/`로 묶여 있습니다.
+한쪽만 고치면 테스트가 잡습니다. **양방향으로 실제 검증됐습니다** — 지문 정규 텍스트·다이제스트,
+오류 코드 43개, `PROTOCOL_VERSION` 전부.
+
+### 5.6 불변 규칙
+한 프레임은 **완전 복원이거나 원본과 바이트 동일**이거나 둘 중 하나입니다. 세 번째 상태는
+없습니다 (`prd.md` §5.8.2). 부분 합성은 금지입니다.
+
+---
+
+## 6. 다음 작업 — 순서 고정
+
+게이트가 `PASS_ALIGNMENT_BLOCKED`이므로 **Phase 1은 진행 가능**합니다. 다만 우선순위가 바뀌었습니다.
+
+**가장 중요한 미해결 질문:** 위 수치는 전부 **고전 해법(IBP)** 으로 잰 것입니다. IBP는 정렬된
+픽셀을 전부 증거로 취급합니다. **학습된 복원기는 대응이 나쁜 증거를 무시하도록 학습될 수 있습니다.**
+그게 되는지가 다중 프레임이 slow 대역 밖에서도 살아남는지를 결정합니다 — Phase 2의 진짜 실험입니다.
+
+1. **네거티브 코퍼스 — 4~6px 대역을 겨냥해서.** 실험 A가 여기가 병목임을 확정했습니다.
+   §11.4 v3.2에 따라 절반은 진짜 아티팩트로 만들 수 있고(저비트레이트 블로킹·리샘플링·그레인),
+   디포커스/보케와 진짜 격자 콘텐츠(픽셀아트·LED월·메시)는 수집해야 합니다.
+   **클린 영상을 더 넣는 것은 이 숫자를 개선하지 않습니다.**
+2. **두 번째 CC 소스** 추가 — 지금 수치는 영화 한 편이라 콘텐츠 간 일반화를 전혀 못 봅니다.
+3. **§5.4.4 격자 앵커링 판정**을 신뢰 수준까지. 게이트가 이걸 필수 안전장치로 만들었습니다.
+4. **task 0.5 마무리** — §11.3 랜덤화 매트릭스. 재압축은 게이트에서 이미 넣었고 CRF 18→26에
+   이득의 약 23%가 사라지는 것을 확인했습니다. 크로마 서브샘플링·모션 블러·다중 ROI가 남았습니다.
+5. **Phase 2는 정렬부터.** §5.7 밀집 광류 + **픽셀 단위** 신뢰도. 프레임 단위 광도 잔차 비율은
+   부족하다는 것이 측정됐습니다(medium 대역에서 86%를 통과시키고도 −1.76 dB).
+6. **정렬이 생기면 게이트를 다시 돌리세요.** 움직여야 하는 숫자는 `estimated` 팔입니다.
+   LPIPS가 Phase 2에 도착하면 §1.4.3의 나머지 두 기준도 그때 채워집니다.
+7. 곁들여: `Speed` 인코더 프로파일이 `tools/ffmpeg`를 서브프로세스로 불러야 합니다 (§4 발견 7).
+
+---
+
+## 7. 작업 방식 메모
+
+- 커밋 메시지는 한국어, 무엇을 왜 고쳤는지 서술형으로.
+- 사용자가 요청하지 않으면 커밋·푸시하지 않습니다. **현재 저장소는 `git init`만 된 상태이고
+  커밋이 하나도 없습니다.**
+- 파이썬 스크립트에 Windows 경로를 쓸 때는 raw 문자열(`r"C:\..."`)을 쓰세요. `SyntaxWarning:
+  invalid escape sequence`가 계속 납니다.
+- 순수 로직은 `Domain`(C#) / 순수 모듈(Python)에 둡니다. GPU나 파일 시스템 없이 테스트할 수
+  없는 규칙은 잘못된 위치에 있는 것입니다 (`prd.md` §13.2).
+- 측정하지 않은 수치를 문서·커밋 메시지·보고에 쓰지 마세요. 개선을 주장하려면 **노이즈 바닥을
+  먼저 재세요** (§13.5).

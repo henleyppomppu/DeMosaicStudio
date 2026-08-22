@@ -1,0 +1,23 @@
+# Default: let git normalise text, but never guess about the files below.
+* text=auto
+
+# Media fixtures and weights are binary. CRLF conversion would corrupt them silently, and the
+# corruption would surface as a decoder error in a test rather than as anything obviously
+# version-control-shaped.
+*.mp4 binary
+*.mkv binary
+*.mov binary
+*.y4m binary
+*.png binary
+*.jpg binary
+*.pt  binary
+*.onnx binary
+
+# PowerShell scripts are UTF-8 with BOM (prd.md §4.4). Line endings may normalise; the BOM must not
+# be touched, and marking them text keeps git from ever treating the BOM as a binary signature.
+*.ps1 text eol=crlf
+*.iss text eol=crlf
+
+# Keep parity fixtures byte-stable across platforms: both language implementations hash their
+# contents, so an eol rewrite on one machine would break the cross-language lock on the other.
+fixtures/parity/*.json text eol=lf

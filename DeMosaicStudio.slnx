@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/DeMosaicStudio.Domain/DeMosaicStudio.Domain.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/DeMosaicStudio.Domain.Tests/DeMosaicStudio.Domain.Tests.csproj" />
+  </Folder>
+</Solution>

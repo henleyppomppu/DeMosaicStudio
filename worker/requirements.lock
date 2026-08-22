@@ -1,0 +1,10 @@
+# Worker runtime dependencies. prd.md §4.1, §14.4.
+# Installed by scripts/setup-worker.ps1. Versions are pinned, never floating.
+#
+# This file is the *shipped* engine's dependency set. Training-only packages belong in
+# training/requirements.lock and are never imported by demosaic_worker (AGENTS.md layer rules).
+
+av==14.0.1
+numpy==2.2.1
+pillow==12.3.0
+pytest==8.3.4

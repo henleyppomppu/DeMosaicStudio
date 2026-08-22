@@ -1,0 +1,11 @@
+# Training dependencies. prd.md §4.3 — training/ is not part of the shipped engine.
+#
+# torch/torchvision carry a CUDA local version tag, so they resolve only from NVIDIA's index:
+#
+#   .venv/Scripts/python.exe -m pip install -r training/requirements.lock #       --index-url https://download.pytorch.org/whl/cu124
+#
+# cu124 rather than a newer build: it is what the installed driver and the RTX 3080 Ti
+# (compute capability 8.6) were verified against on 2026-08-22.
+
+torch==2.6.0+cu124
+torchvision==0.21.0+cu124
