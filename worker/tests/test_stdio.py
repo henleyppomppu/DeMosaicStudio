@@ -7,6 +7,7 @@ a UTF-8 host would pass while the shipped worker corrupted every non-ASCII path 
 from __future__ import annotations
 
 import io
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -81,3 +82,36 @@ def test_non_ascii_survives_a_real_subprocess_round_trip() -> None:
     )
 
     assert result.stdout.decode("utf-8").strip() == payload
+
+
+def test_stdin_is_utf8_too() -> None:
+    """The channel requests arrive on, and the one this module forgot.
+
+    stdout and stderr were configured from the start; stdin was left at whatever the console
+    offered. On a Korean-locale machine that is cp949, so a host that correctly wrote a UTF-8 path
+    had it mis-decoded and the worker died mid-handshake. A C# round-trip test against a directory
+    named in Hangul found it in one run.
+    """
+    script = (
+        "import sys, json\n"
+        "sys.path.insert(0, r'{worker}')\n"
+        "from demosaic_worker.stdio import configure_stdio_utf8, is_utf8\n"
+        "configure_stdio_utf8()\n"
+        "line = sys.stdin.readline()\n"
+        "print(json.dumps({{'stdin': is_utf8(sys.stdin), 'read': json.loads(line)['path']}}))\n"
+    ).format(worker=str(_repository_root() / "worker"))
+
+    path = "D:/영상/클립.mp4"
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        input=json.dumps({"path": path}) + "\n",
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=60,
+    )
+
+    assert completed.returncode == 0, completed.stderr[-500:]
+    reply = json.loads(completed.stdout.strip().splitlines()[-1])
+    assert reply["stdin"], "stdin was not reconfigured to UTF-8"
+    assert reply["read"] == path, f"the path came back as {reply['read']!r}"

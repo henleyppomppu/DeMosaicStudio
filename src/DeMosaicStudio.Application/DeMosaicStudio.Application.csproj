@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    AGENTS.md layer rules: Application depends on Domain and **must not know the engine is a
+    process, or that it is Python**. It says what a job is and what a queue does; how the work
+    happens is Infrastructure's business.
+  -->
+  <PropertyGroup>
+    <RootNamespace>DeMosaicStudio.Application</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DeMosaicStudio.Domain\DeMosaicStudio.Domain.csproj" />
+  </ItemGroup>
+
+</Project>

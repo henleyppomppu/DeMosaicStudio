@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    AGENTS.md layer rules: Infrastructure may depend on Domain and Application and **must not
+    contain policy decisions**. It knows the engine is a process speaking JSON Lines; it decides
+    nothing about restoration.
+  -->
+  <PropertyGroup>
+    <RootNamespace>DeMosaicStudio.Infrastructure</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DeMosaicStudio.Application\DeMosaicStudio.Application.csproj" />
+    <ProjectReference Include="..\DeMosaicStudio.Domain\DeMosaicStudio.Domain.csproj" />
+  </ItemGroup>
+
+</Project>

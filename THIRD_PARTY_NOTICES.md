@@ -13,6 +13,7 @@ A dependency that appears in a lockfile without an entry here fails
 | --- | --- | --- | --- | --- |
 | xunit | 2.9.3 | Apache-2.0 | No | https://github.com/xunit/xunit |
 | xunit.runner.visualstudio | 3.1.4 | Apache-2.0 | No | https://github.com/xunit/visualstudio.xunit |
+| Xunit.SkippableFact | 1.5.23 | MS-PL | No | https://github.com/AArnott/Xunit.SkippableFact |
 | Microsoft.NET.Test.Sdk | 17.14.1 | MIT | No | https://github.com/microsoft/vstest |
 | coverlet.collector | 6.0.4 | MIT | No | https://github.com/coverlet-coverage/coverlet |
 | pytest | 8.3.4 | MIT | No | https://github.com/pytest-dev/pytest |

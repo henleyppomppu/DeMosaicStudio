@@ -9,7 +9,11 @@ user's PC.
 
 So the worker configures its own streams rather than inheriting whatever the console offers.
 
-* stdout is the protocol channel: UTF-8, newline-terminated, line-buffered, and **strict** — a
+* **stdin** is the protocol channel too, and it was the one this module forgot. Requests arrive on
+  it, and a request carries file paths. Left at cp949, a host that correctly wrote UTF-8 got its
+  path mis-decoded and the worker died mid-handshake — found by a round-trip test against a Korean
+  directory name, which on a Korean-locale machine is not an edge case but the normal one.
+* stdout is the protocol channel out: UTF-8, newline-terminated, line-buffered, and **strict** — a
   character that cannot be encoded is a bug worth failing on, not one worth hiding.
 * stderr is the human log channel: UTF-8, but with ``errors="replace"``, because losing a
   diagnostic message to an encoding error while diagnosing something else is a poor trade.
@@ -30,17 +34,23 @@ PROTOCOL_NEWLINE = "\n"
 def configure_stdio_utf8(
     stdout: IO[Any] | None = None,
     stderr: IO[Any] | None = None,
+    stdin: IO[Any] | None = None,
 ) -> None:
     """Forces UTF-8 on the worker's standard streams.
 
-    Call this before writing anything, and before the handshake in particular. Idempotent, and a
-    no-op on a stream that cannot be reconfigured (a pipe replaced by a test double, say).
+    Call this before reading or writing anything, and before the handshake in particular.
+    Idempotent, and a no-op on a stream that cannot be reconfigured (a pipe replaced by a test
+    double, say).
     """
     out = stdout if stdout is not None else sys.stdout
     err = stderr if stderr is not None else sys.stderr
+    inp = stdin if stdin is not None else sys.stdin
 
     _reconfigure(out, errors="strict")
     _reconfigure(err, errors="replace")
+    # Strict on the way in as well: a request that does not decode is a protocol error worth
+    # reporting, not one worth guessing at.
+    _reconfigure(inp, errors="strict")
 
 
 def _reconfigure(stream: IO[Any], *, errors: str) -> None:
