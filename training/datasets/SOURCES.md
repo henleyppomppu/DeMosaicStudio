@@ -81,3 +81,72 @@ fast=4 · medium=7 · slow=8 · static=5
 | `tos_021.mp4` | clean-tos | Tears of Steel @ 543s | static | 0.12 | 96 | `27df0dfc2a71…` |
 | `tos_022.mp4` | clean-tos | Tears of Steel @ 567s | slow | 0.88 | 96 | `806992661baf…` |
 | `tos_023.mp4` | clean-tos | Tears of Steel @ 590s | static | 0.20 | 96 | `5909be049d55…` |
+
+### `clean-sintel` — Sintel (2010)
+
+| Field | Value |
+| --- | --- |
+| Attribution | (CC) Blender Foundation \| durian.blender.org |
+| License | CC BY 3.0 |
+| Source file | `Sintel.2010.1080p.mkv`, 1920x818, 24 fps, 888 s |
+| Download | https://download.blender.org/durian/movies/Sintel.2010.1080p.mkv |
+| SHA-256 | `97f1dbc66231df42ad49bd8c29aa174b8f48933058e47e7157d4ba63d93a8efa` |
+| Retrieved | 2026-08-23 |
+| Built by | `scripts/build_corpus.py --clips 24 --seconds 4 --prefix sintel --skip-head 60 --skip-tail 120` |
+| Manifest | `training/datasets/clean-sintel.manifest.json` |
+
+**Why this film.** The corpus was one film, so nothing could distinguish "the pipeline works" from
+"the pipeline works on Tears of Steel". Sintel is pure CG rather than live action plus VFX, and its
+motion distribution is the opposite end: **fast=9 · medium=5 · slow=3 · static=7** against Tears of
+Steel's fast=4 · medium=7 · slow=8 · static=5.
+
+**What it immediately showed.** The accumulator gains **+0.39 dB** here at the shipped forgetting
+horizon against +7.05 on the screen-anchored clip. Fast content is where the method is weakest, and
+one film could not say so.
+
+First six clips (the manifest has all 24):
+
+| Clip | Split | Origin | Motion band | Median px/frame | Frames | SHA-256 |
+| --- | --- | --- | --- | ---: | ---: | --- |
+| `sintel_000.mp4` | clean-sintel | 60s | fast | 12.74 | 96 | `77838dbc8a9b…` |
+| `sintel_001.mp4` | clean-sintel | 90s | static | 0.00 | 95 | `61122a88daa1…` |
+| `sintel_002.mp4` | clean-sintel | 119s | slow | 0.77 | 95 | `328e82bab4b9…` |
+| `sintel_003.mp4` | clean-sintel | 149s | static | 0.00 | 95 | `05eb042cdb47…` |
+| `sintel_004.mp4` | clean-sintel | 178s | fast | 12.68 | 95 | `2367affcd448…` |
+| `sintel_005.mp4` | clean-sintel | 208s | static | 0.06 | 95 | `690dfb9b0461…` |
+
+### `clean-bbb` — Big Buck Bunny (2008)
+
+| Field | Value |
+| --- | --- |
+| Attribution | (CC) Blender Foundation \| peach.blender.org |
+| License | CC BY 3.0 |
+| Source file | `bbb_sunflower_1080p_30fps_normal.mp4`, 1920x1080, 30 fps, 635 s |
+| Download | https://download.blender.org/demo/movies/BBB/bbb_sunflower_1080p_30fps_normal.mp4.zip |
+| Archive SHA-256 | `e320fef389ec749117d0c1583945039266a40f25483881c2ff0d33207e62b362` |
+| Retrieved | 2026-08-23 |
+| Built by | `scripts/build_corpus.py --clips 24 --seconds 4 --prefix bbb --skip-head 20 --skip-tail 40` |
+| Manifest | `training/datasets/clean-bbb.manifest.json` |
+
+**Why this film, and it is not for the clean corpus.** Flat cartoon shading is the shape a mosaic
+detector confuses with block averaging: large regions of near-constant colour, hard edges, no grain.
+It is the closest thing to a **hard negative** (section 11.4) that can be downloaded rather than
+filmed, and it is nothing like the live action plus VFX the detector was trained on.
+
+**What it immediately showed.** At the shipped threshold, **81.8%** of its clean frames produce a
+region, against 55.2% on Tears of Steel — and the mean false-positive area is three times as large.
+section 5.2.5a asks for 0.5%.
+
+**Motion:** medium=6 · slow=1 · **static=17**. Held cartoon shots, so it is a poor source for the
+temporal questions and a good one for the detector.
+
+First six clips (the manifest has all 24):
+
+| Clip | Split | Origin | Motion band | Median px/frame | Frames | SHA-256 |
+| --- | --- | --- | --- | ---: | ---: | --- |
+| `bbb_000.mp4` | clean-bbb | 20s | static | 0.18 | 120 | `66e4c41e8c0e…` |
+| `bbb_001.mp4` | clean-bbb | 44s | static | 0.05 | 119 | `38ae625f561e…` |
+| `bbb_002.mp4` | clean-bbb | 68s | static | 0.01 | 119 | `b69567759535…` |
+| `bbb_003.mp4` | clean-bbb | 92s | static | 0.02 | 120 | `f7a79373341d…` |
+| `bbb_004.mp4` | clean-bbb | 116s | medium | 2.35 | 119 | `208e7d9297fd…` |
+| `bbb_005.mp4` | clean-bbb | 140s | static | 0.15 | 119 | `f456af3ca006…` |
