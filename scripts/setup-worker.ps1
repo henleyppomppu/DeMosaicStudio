@@ -187,5 +187,5 @@ Write-Host '    .\scripts\check-environment.ps1'
 Write-Host '    .\.venv\Scripts\python.exe -m pytest'
 Write-Host ''
 Write-Host 'Training (training\, not part of the shipped engine) needs torch as well:'
-Write-Host '    .\.venv\Scripts\python.exe -m pip install -r trainingequirements.lock --index-url https://download.pytorch.org/whl/cu124'
+Write-Host '    .\.venv\Scripts\python.exe -m pip install -r training\requirements.lock --index-url https://download.pytorch.org/whl/cu124'
 Write-Host ''

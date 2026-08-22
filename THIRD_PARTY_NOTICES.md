@@ -17,6 +17,16 @@ A dependency that appears in a lockfile without an entry here fails
 | Microsoft.NET.Test.Sdk | 17.14.1 | MIT | No | https://github.com/microsoft/vstest |
 | coverlet.collector | 6.0.4 | MIT | No | https://github.com/coverlet-coverage/coverlet |
 | pytest | 8.3.4 | MIT | No | https://github.com/pytest-dev/pytest |
+| lpips | 0.1.4 | BSD-2-Clause | No | https://github.com/richzhang/PerceptualSimilarity |
+| scipy | 1.18.1 | BSD-3-Clause | No | https://github.com/scipy/scipy |
+| tqdm | 4.70.0 | MPL-2.0 / MIT | No | https://github.com/tqdm/tqdm |
+
+### Model weights, not code
+
+| Weights | License | Note |
+| --- | --- | --- |
+| AlexNet (torchvision, `alexnet-owt-7be5be79.pth`, 233 MB) | BSD-3-Clause | LPIPS trunk. **Evaluation only** - `scripts/perceptual.py`, never the shipped worker |
+| LPIPS v0.1 linear layers (bundled in the `lpips` package, ~6 KB) | BSD-2-Clause | Same |
 
 ## Planned dependencies with license consequences
 

@@ -9,3 +9,10 @@
 
 torch==2.6.0+cu124
 torchvision==0.21.0+cu124
+
+# Perceptual distance, for evaluation only (prd.md section 1.4.3). It pulls a 233 MB AlexNet trunk
+# on first use, which is why it is here and not in worker/requirements.lock: the shipped engine has
+# no business carrying a perceptual model to restore a video.
+lpips==0.1.4
+scipy==1.18.1
+tqdm==4.70.0

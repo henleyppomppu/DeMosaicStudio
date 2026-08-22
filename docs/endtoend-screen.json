@@ -2,52 +2,57 @@
   "clip": "screen",
   "input": {
     "inside_psnr": 25.306,
+    "inside_lpips": 0.5534,
     "outside_psnr": 53.582
   },
   "rungs": [
     {
       "name": "baseline",
       "changed": "detector v0.1.0, mask 0.5, CRF 20",
-      "inside_psnr": 28.193,
-      "inside_ssim": 0.979,
-      "outside_psnr": 45.726,
-      "frames_improved": 0.812,
+      "inside_psnr": 29.298,
+      "inside_ssim": 0.9799,
+      "inside_lpips": 0.2597,
+      "outside_psnr": 45.909,
+      "frames_improved": 0.917,
       "regions_detected": 539,
       "frames_restored": 95,
-      "seconds": 150.6
+      "seconds": 115.3
     },
     {
       "name": "model",
       "changed": "+ detector v0.2.0",
-      "inside_psnr": 28.518,
-      "inside_ssim": 0.9792,
-      "outside_psnr": 45.864,
-      "frames_improved": 0.979,
+      "inside_psnr": 29.918,
+      "inside_ssim": 0.9802,
+      "inside_lpips": 0.2507,
+      "outside_psnr": 46.067,
+      "frames_improved": 0.99,
       "regions_detected": 291,
       "frames_restored": 95,
-      "seconds": 98.9
+      "seconds": 81.5
     },
     {
       "name": "threshold",
       "changed": "+ mask threshold 0.9 (calibrated)",
-      "inside_psnr": 27.811,
-      "inside_ssim": 0.9789,
-      "outside_psnr": 45.903,
-      "frames_improved": 0.906,
+      "inside_psnr": 28.582,
+      "inside_ssim": 0.9797,
+      "inside_lpips": 0.2874,
+      "outside_psnr": 46.054,
+      "frames_improved": 0.979,
       "regions_detected": 198,
       "frames_restored": 95,
-      "seconds": 82.3
+      "seconds": 70.3
     },
     {
       "name": "encode",
       "changed": "+ CRF 12 (measured transparent)",
-      "inside_psnr": 27.602,
-      "inside_ssim": 0.9806,
-      "outside_psnr": 47.912,
-      "frames_improved": 0.844,
+      "inside_psnr": 28.378,
+      "inside_ssim": 0.9815,
+      "inside_lpips": 0.306,
+      "outside_psnr": 48.166,
+      "frames_improved": 0.969,
       "regions_detected": 198,
       "frames_restored": 95,
-      "seconds": 88.3
+      "seconds": 70.6
     }
   ]
 }

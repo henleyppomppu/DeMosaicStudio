@@ -106,3 +106,48 @@ def test_the_cli_help_survives_a_cp949_console() -> None:
 
     assert result.returncode == 0, result.stderr[-800:]
     assert "usage:" in result.stdout
+
+
+# ------------------------------------------------------------------------------------------
+# Stray carriage returns. AGENTS.md, CLAUDE.md section 4.
+# ------------------------------------------------------------------------------------------
+
+
+def _tracked_text_files() -> list[Path]:
+    """Files git knows about, minus the ones that are not text."""
+    listed = subprocess.run(
+        ["git", "ls-files"], capture_output=True, text=True, cwd=str(REPO), check=False
+    )
+    if listed.returncode != 0:
+        return []
+
+    skip = {".mp4", ".mkv", ".mov", ".pt", ".png", ".jpg", ".ico", ".pyc"}
+    return [
+        path
+        for name in listed.stdout.split()
+        if (path := REPO / name).is_file() and path.suffix.lower() not in skip
+    ]
+
+
+def test_no_file_contains_a_stray_carriage_return() -> None:
+    r"""A lone CR inside a line is almost always a mangled backslash escape.
+
+    ``"training\requirements.lock"`` written through a tool that interprets ``\r`` becomes
+    ``training`` + CR + ``equirements.lock``. The file still parses, the path still looks right in
+    most editors, and the instruction printed to the user is wrong. It reached
+    ``scripts/setup-worker.ps1`` and told people to install from a file that does not exist.
+
+    CRLF line endings are normal here and are not what this looks for; a CR **not** followed by LF
+    is.
+    """
+    offenders: list[str] = []
+
+    for path in _tracked_text_files():
+        raw = path.read_bytes()
+        for index, byte in enumerate(raw):
+            if byte == 13 and (index + 1 >= len(raw) or raw[index + 1] != 10):
+                line = raw[:index].count(b"\n") + 1
+                offenders.append(f"{path.relative_to(REPO)}:{line}")
+                break
+
+    assert not offenders, "stray carriage return in: " + ", ".join(offenders)

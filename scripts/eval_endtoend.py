@@ -36,6 +36,7 @@ sys.path.insert(0, str(REPO / "training"))
 from demosaic_worker.metrics import psnr, ssim  # noqa: E402
 
 import evalclips  # noqa: E402
+import perceptual  # noqa: E402
 
 PYTHON = REPO / ".venv" / "Scripts" / "python.exe"
 ARTIFACTS = REPO / "artifacts"
@@ -60,6 +61,7 @@ class Score:
     changed: str
     inside_psnr: float
     inside_ssim: float
+    inside_lpips: float
     outside_psnr: float
     frames_improved: float
     regions_detected: int
@@ -108,6 +110,17 @@ def run_worker(source: Path, output: Path, rung: Rung) -> dict:
     raise SystemExit(f"no result from the worker (exit {proc.returncode})")
 
 
+def _rgb(path: Path, limit: int = 200) -> list[np.ndarray]:
+    """Colour frames, for LPIPS. It is trained on RGB and greyscale would be a different question."""
+    out: list[np.ndarray] = []
+    with av.open(str(path)) as container:
+        for frame in container.decode(container.streams.video[0]):
+            out.append(frame.to_ndarray(format="rgb24"))
+            if len(out) >= limit:
+                break
+    return out
+
+
 def _luma(path: Path, limit: int = 200) -> list[np.ndarray]:
     out: list[np.ndarray] = []
     with av.open(str(path)) as container:
@@ -116,6 +129,32 @@ def _luma(path: Path, limit: int = 200) -> list[np.ndarray]:
             if len(out) >= limit:
                 break
     return out
+
+
+def perceptual_distance(clean_path: Path, output_path: Path, mask_of, stride: int = 6) -> float:
+    """LPIPS over the region's bounding box. **Lower is better** (section 1.4.3).
+
+    The box rather than the mask: LPIPS reads a whole image, and handing it a masked-out frame would
+    score the black surround as much as the restoration.
+    """
+    if not perceptual.is_available():
+        return float("nan")
+
+    clean = _rgb(clean_path)
+    restored = _rgb(output_path)
+    count = min(len(clean), len(restored))
+    scores: list[float] = []
+
+    for index in range(0, count, stride):
+        region = mask_of(index, clean[index].shape[:2])
+        ys, xs = np.nonzero(region)
+        if len(ys) < 100:
+            continue
+        box = (ys.min(), ys.max() + 1, xs.min(), xs.max() + 1)
+        crop = lambda a: a[box[0]:box[1], box[2]:box[3]]  # noqa: E731
+        scores.append(perceptual.distance(crop(clean[index]), crop(restored[index])))
+
+    return float(np.mean(scores)) if scores else float("nan")
 
 
 def score(clean_path: Path, input_path: Path, output_path: Path,
@@ -186,13 +225,15 @@ def main(argv: list[str] | None = None) -> int:
         inside_psnr, inside_ssim, outside_psnr, improved = score(
             clip.clean, source, output, clip.mask
         )
+        inside_lpips = perceptual_distance(clip.clean, output, clip.mask)
         scores.append(
             Score(rung.name, rung.changed, round(inside_psnr, 3), round(inside_ssim, 4),
-                  round(outside_psnr, 3), round(improved, 3),
+                  round(inside_lpips, 4), round(outside_psnr, 3), round(improved, 3),
                   summary["regionsDetected"], summary["framesRestored"], round(elapsed, 1))
         )
-        print(f"  inside {inside_psnr:.2f} dB | outside {outside_psnr:.2f} dB | "
-              f"{summary['regionsDetected']} regions | {elapsed:.0f}s", flush=True)
+        print(f"  inside {inside_psnr:.2f} dB | LPIPS {inside_lpips:.4f} | "
+              f"outside {outside_psnr:.2f} dB | {summary['regionsDetected']} regions | "
+              f"{elapsed:.0f}s", flush=True)
 
     # The input's own scores are the bar: the pipeline has to beat what it was given.
     clean = _luma(clip.clean)
@@ -209,24 +250,32 @@ def main(argv: list[str] | None = None) -> int:
 
     baseline_inside = float(np.mean(reference_inside))
     baseline_outside = float(np.mean(reference_outside))
+    baseline_lpips = perceptual_distance(clip.clean, source, clip.mask)
 
     report = {
         "clip": clip.name,
-        "input": {"inside_psnr": round(baseline_inside, 3), "outside_psnr": round(baseline_outside, 3)},
+        "input": {"inside_psnr": round(baseline_inside, 3),
+                  "inside_lpips": round(baseline_lpips, 4),
+                  "outside_psnr": round(baseline_outside, 3)},
         "rungs": [asdict(s) for s in scores],
     }
     args.out.write_text(json.dumps(report, indent=2), encoding="utf-8")
 
     print()
-    print(f"{'rung':12} {'changed':38} {'inside':>8} {'vs in':>7} {'outside':>8} {'vs in':>7} {'improved':>9}")
+    print(f"{'rung':12} {'changed':34} {'inside':>8} {'vs in':>7} {'LPIPS':>8} "
+          f"{'outside':>8} {'vs in':>7} {'improved':>9}")
     # ASCII only: this runs on a cp949 console, where an em dash raises UnicodeEncodeError
     # (AGENTS.md, CLAUDE.md §4). It did, twice, after the measurements had already been written.
-    print(f"{'(input)':12} {'the mosaicked video itself':38} {baseline_inside:8.2f} "
-          f"{'-':>7} {baseline_outside:8.2f} {'-':>7} {'-':>9}")
+    print(f"{'(input)':12} {'the mosaicked video itself':34} {baseline_inside:8.2f} "
+          f"{'-':>7} {baseline_lpips:8.4f} {baseline_outside:8.2f} {'-':>7} {'-':>9}")
     for s in scores:
-        print(f"{s.name:12} {s.changed[:38]:38} {s.inside_psnr:8.2f} "
-              f"{s.inside_psnr - baseline_inside:+7.2f} {s.outside_psnr:8.2f} "
-              f"{s.outside_psnr - baseline_outside:+7.2f} {s.frames_improved:9.0%}")
+        print(f"{s.name:12} {s.changed[:34]:34} {s.inside_psnr:8.2f} "
+              f"{s.inside_psnr - baseline_inside:+7.2f} {s.inside_lpips:8.4f} "
+              f"{s.outside_psnr:8.2f} {s.outside_psnr - baseline_outside:+7.2f} "
+              f"{s.frames_improved:9.0%}")
+
+    print()
+    print("LPIPS is a perceptual distance: **lower is better**, unlike every other column.")
 
     return 0
 
