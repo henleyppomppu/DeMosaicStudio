@@ -579,7 +579,7 @@ WPF 앱, C# Application/Infrastructure 계층, 체크포인트/재개, 미리보
 ```powershell
 dotnet build DeMosaicStudio.slnx -c Release   # 경고 0 유지
 dotnet test  DeMosaicStudio.slnx -c Release   # 현재 108/108
-.\.venv\Scripts\python.exe -m pytest        # 현재 373 통과 · 5 스킵 (약 95초)
+.\.venv\Scripts\python.exe -m pytest        # 현재 367 통과 · 3 스킵 (약 73초)
 .\scripts\check-environment.ps1              # 현재 7/7
 ```
 
@@ -587,7 +587,7 @@ dotnet test  DeMosaicStudio.slnx -c Release   # 현재 108/108
 `python`은 Microsoft Store 스텁이라 **반드시 `.venv\Scripts\python.exe`를 쓰세요.**
 미디어 픽스처를 다시 만들려면 `.venv\Scripts\python.exe scripts\make_fixtures.py` — 단 §4.10을 먼저 읽으세요.
 
-**"통과"를 "검증됨"으로 착각하지 마세요.** 481개(C# 108 + Python 373) 중 실제 미디어·GPU를
+**"통과"를 "검증됨"으로 착각하지 마세요.** 475개(C# 108 + Python 367) 중 실제 미디어·GPU를
 건드리는 것은 일부뿐이고, **실제 모자이크 영상은 아직 한 번도 시험되지 않았습니다.**
 
 게이트를 다시 돌리려면(약 20분):
