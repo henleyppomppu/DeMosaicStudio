@@ -730,3 +730,82 @@ put one shot's picture into another. Each is a guard test in `test_accumulator.p
 **§5.6's window is now mostly vestigial.** It still gates *whether* multi-frame runs — through the
 motion band and the object-anchored rule — but its size no longer sets how much evidence is used.
 `WINDOW_BY_MOTION` and the cap of 9 should be re-read in that light rather than trusted.
+
+---
+
+## D-29 — Evidence is forgotten on a horizon, and the streaking was mostly not there
+
+**Status:** accepted (2026-08-23) · **Corrects:** D-28's description of the artefact
+
+### What the artefact turned out to be
+
+D-28 reported "directional streaking" in the restored region. Measured, that was an over-reading.
+The error's high-frequency horizontal energy is **lower** in the output (0.352) than in the
+mosaicked input (0.391), and the offline prototype — no detector, no ROI, no blending, no encoder —
+produces the same texture. Most of what looked like streaking is residual block structure and
+partially recovered detail: an incomplete restoration, not an added artefact.
+
+Two ablations pinned the loop down:
+
+| | PSNR | ripple |
+| --- | ---: | ---: |
+| the mosaicked input | 24.12 | 0.391 |
+| **warping alone, from a clean frame** | **13.19** | 0.146 |
+| folding alone, nothing moving | 24.11 | 0.394 |
+| both, as shipped | 28.96 | 0.352 |
+
+Chaining 24 warps of a *clean* frame costs 11 dB. Folding, with nothing moving, costs nothing. So
+the warp is where the damage is and the fold is what keeps the chain honest — it re-anchors the
+estimate to a real observation every frame.
+
+### The real defect
+
+Quality does not rise forever with the chain. It peaks and falls, because the oldest evidence in a
+chain of N has been warped N times and carries N frames of the flow's error:
+
+| depth | 4 | 8 | 12 | 16 | 24 | 32 | 48 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| screen-anchored | +3.28 | +4.07 | +4.07 | **+4.10** | +3.78 | +3.59 | +3.27 |
+| object-anchored | +1.71 | +2.49 | +2.95 | +3.23 | +3.31 | **+3.35** | +2.72 |
+
+### Decision
+
+An exponential forgetting horizon: each frame the carried estimate is decayed towards what that
+frame observed, by `1 / EVIDENCE_HORIZON_FRAMES`. A depth **cap** would be a reset — it discards
+the chain and restarts at zero, which oscillates. Decaying bounds the horizon and keeps the chain.
+
+Measured at depth 48:
+
+| horizon | off | 64 | **32** | 16 | 8 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| screen | +3.27 | +4.49 | **+5.28** | +5.97 | +6.01 |
+| ladder | +2.72 | +2.85 | **+2.81** | +2.54 | +1.98 |
+
+32 improves both. **The optimum itself differs** — 8–16 for the fast pan, 32–64 for the slow drift
+— so a frame count is not the governing quantity. Two clips cannot say what is; accumulated warping
+error, which grows with motion per frame, is the candidate.
+
+### Consequences
+
+| | before | after |
+| --- | ---: | ---: |
+| screen-anchored, vs input | +1.804 dB, 76% of frames | **+2.296 dB, 84%** |
+| object-anchored ladder | +2.087 dB, 99% | **+2.217 dB, 100%** |
+
+Through the pipeline, the gain rises with the chain's depth exactly as the design says it should:
+**+0.84 dB** at depth 0–4, **+1.56** at 5–19, **+2.15** at 20 or more.
+
+### Four fixes that were measured and rejected
+
+Recorded so nobody spends the afternoon again:
+
+- **Anchoring the estimate and composing flows** — hold the estimate in the chain's first frame and
+  warp only corrections, so the estimate is never cumulatively resampled. **Much worse**: 11.51 dB
+  at depth 24 against 28.96. Composed flows drift, and a drifting flow misplaces everything at once.
+- **Skipping the warp when nothing moves** — 1.64 dB in the static tail became −1.11. Folding keeps
+  paying even without motion, because it re-anchors the estimate; freezing it does not.
+- **Decaying by forward–backward flow confidence** rather than uniformly — costs 2.24 dB.
+- **Damping the fold** (step 0.5, 0.25) — costs 0.9 and 3.2 dB.
+
+Only the uniform horizon helped, and it is the one that touches how long evidence lives rather than
+how strongly each frame speaks.

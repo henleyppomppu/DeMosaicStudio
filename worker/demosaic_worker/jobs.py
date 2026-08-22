@@ -501,7 +501,10 @@ class JobRunner:
                                               outcome.profile.anchor)),
                         "anchorConfidence": round(outcome.profile.anchor_confidence, 4),
                         "meanAlignment": round(outcome.mean_alignment, 4),
-                        "usableNeighbours": outcome.usable_neighbours,
+                        # With an accumulator this is the depth of the evidence chain, not a count
+                        # of simultaneously aligned neighbours. A chain that keeps restarting shows
+                        # up here as a number that never grows.
+                        "evidenceDepth": outcome.usable_neighbours,
                         "reason": outcome.decision.reason.value,
                     }) + "\n")
 

@@ -259,3 +259,67 @@ def test_the_shift_helper_matches_the_flow_convention() -> None:
     recovered = warp_by_flow(moved, _shift_flow(scene.shape, 4.0))
 
     assert psnr(scene[:, 8:-8], recovered[:, 8:-8]) > 40.0
+
+
+# --------------------------------------------------------------------------------------------
+# The forgetting horizon
+# --------------------------------------------------------------------------------------------
+
+
+def test_the_horizon_bounds_how_long_evidence_survives() -> None:
+    """Old evidence fades rather than being discarded, so nothing ever resets to zero.
+
+    A depth cap would be a reset: it throws the chain away and starts again, which oscillates.
+    Decaying towards the observation bounds the horizon and leaves the chain intact - `depth` keeps
+    growing here while the influence of the first frame does not.
+
+    The estimate is given fine texture whose **block means already match** the observation, so the
+    back-projection has nothing to correct and the decay is the only thing acting. Without that the
+    fold would slam the estimate onto the observation in a single frame and the horizon would be
+    invisible.
+    """
+    height, width = 64, 64
+    bounds = (0, 0, width, height)
+    mask = np.ones((height, width), dtype=bool)
+
+    ys, xs = np.mgrid[0:height, 0:width]
+    texture = 40.0 * np.where(((ys % SPEC.block_height) + (xs % SPEC.block_width)) % 2 == 0, 1, -1)
+    observation = np.full((height, width), 128.0)
+    seeded = observation + texture
+    assert np.allclose(block_average(seeded, SPEC, (0, 0)), observation), (
+        "the seed's block means must match, or the fold acts too"
+    )
+
+    def amplitude_after(horizon: int, frames: int) -> float:
+        accumulator = EvidenceAccumulator(horizon=horizon)
+        _fold(accumulator, 1, 0, seeded, None, bounds, mask, None)
+        estimate = seeded
+        for index in range(1, frames + 1):
+            estimate = _fold(accumulator, 1, index, observation, observation, bounds, mask,
+                             _identity_flow(observation.shape))
+        assert accumulator.depth(1) == frames + 1, "forgetting must not restart the chain"
+        return float(np.abs(estimate - observation).mean())
+
+    start = float(np.abs(seeded - observation).mean())
+    short = amplitude_after(horizon=4, frames=12)
+    long_horizon = amplitude_after(horizon=64, frames=12)
+
+    assert short < start / 2, f"a 4-frame horizon should have mostly forgotten: {short:.1f} of {start:.1f}"
+    assert long_horizon > short * 2, (
+        f"a 64-frame horizon has to hold on much longer: {long_horizon:.1f} vs {short:.1f}"
+    )
+
+
+def test_the_horizon_can_be_switched_off() -> None:
+    bright = np.full((32, 32), 200.0)
+    dark = np.full((32, 32), 40.0)
+    bounds = (0, 0, 32, 32)
+    mask = np.ones((32, 32), dtype=bool)    # fully masked: only the block means are observed
+
+    accumulator = EvidenceAccumulator(horizon=0)
+    _fold(accumulator, 1, 0, bright, None, bounds, mask, None)
+    got = _fold(accumulator, 1, 1, dark, dark, bounds, mask, _identity_flow(dark.shape))
+
+    # With the horizon off and a fully masked frame, the only thing acting is the back-projection.
+    assert accumulator.depth(1) == 2
+    assert got.mean() < 200.0

@@ -40,6 +40,32 @@ from .ibp import forward_and_adjoint
 #: the region has moved far enough that most of what was accumulated is about somewhere else.
 MIN_ROI_OVERLAP = 0.35
 
+#: How many frames of evidence are worth carrying, as an exponential horizon. **Measured.**
+#:
+#: Quality does not rise forever with the chain: it peaks and then falls, because the oldest
+#: evidence in a chain of N has been warped N times and carries N frames of the flow's error with
+#: it. On the screen-anchored clip it peaks at depth 16 and loses 0.8 dB by 48; on the
+#: object-anchored one it peaks at 32 and loses 0.6 dB by 48.
+#:
+#: A depth cap would be a *reset* - it discards everything and starts at zero, which oscillates.
+#: Decaying the carried estimate towards what the current frame observed bounds the horizon without
+#: ever discarding anything. At depth 48:
+#:
+#: =========  =========  =========
+#: horizon    screen     ladder
+#: =========  =========  =========
+#: off        +3.27      +2.72
+#: 64         +4.49      +2.85
+#: **32**     **+5.28**  **+2.81**
+#: 16         +5.97      +2.54
+#: 8          +6.01      +1.98
+#: =========  =========  =========
+#:
+#: 32 improves both. The optimum itself differs between them - 8-16 for the fast pan, 32-64 for the
+#: slow drift - which says the governing quantity is not a frame count. Two clips cannot say what it
+#: is; the likely candidate is accumulated warping error, which grows with the motion per frame.
+EVIDENCE_HORIZON_FRAMES = 32
+
 
 @dataclass(slots=True)
 class TrackEvidence:
@@ -69,6 +95,9 @@ class EvidenceAccumulator:
     """
 
     tracks: dict[int, TrackEvidence] = field(default_factory=dict)
+
+    #: Exponential forgetting horizon in frames; zero or below disables it.
+    horizon: int = EVIDENCE_HORIZON_FRAMES
 
     def depth(self, track_id: int) -> int:
         """How many observations this track has absorbed. Zero if it has none."""
@@ -141,6 +170,12 @@ class EvidenceAccumulator:
 
         carried = _reembed(previous.estimate, previous.bounds, bounds, previous_observation)
         carried = warp_by_flow(carried, flow_to_previous)
+
+        if self.horizon > 0:
+            # Forget slowly. Evidence that has been warped this many times carries more of the
+            # flow's error than of the scene, and holding it costs more than it brings.
+            decay = 1.0 / self.horizon
+            carried = (1.0 - decay) * carried + decay * observation.astype(np.float64)
 
         _, spread = forward_and_adjoint(carried, observation, spec, phase, mask)
         estimate = np.clip(carried + spread, 0.0, 255.0)

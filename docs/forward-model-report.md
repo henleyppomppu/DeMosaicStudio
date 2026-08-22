@@ -238,3 +238,85 @@ perceptual metric, not this one.
 - **The streaking has not been quantified**, only seen.
 - **4.33 fps is the measured ROI**; the ladder clip's larger ellipse at 1920×800 runs at 1.0 fps.
   Detection (119 ms) and one alignment (107 ms) are the whole cost — the accumulator itself is 6 ms.
+
+
+---
+
+## 9. Chasing the streaking, and what was actually wrong
+
+**The characterisation in §8 was an over-reading.** The error's high-frequency horizontal energy is
+*lower* in the output (0.352) than in the mosaicked input (0.391), and the offline prototype — no
+detector, no ROI, no blending, no encoder — produces the same texture. Most of what looked like
+streaking is residual block structure and partially recovered detail: an incomplete restoration
+rather than an added artefact.
+
+Two ablations pinned the loop down, because it only does two things:
+
+| | PSNR | ripple |
+| --- | ---: | ---: |
+| the mosaicked input | 24.12 | 0.391 |
+| **warping alone, from a clean frame** | **13.19** | 0.146 |
+| folding alone, nothing moving | 24.11 | 0.394 |
+| both, as shipped | 28.96 | 0.352 |
+
+Chaining 24 warps of a clean frame costs 11 dB; folding with nothing moving costs nothing. The warp
+is the damage and **the fold is what keeps the chain honest** — it re-anchors the estimate to a real
+observation every frame.
+
+### The real defect: quality peaks with depth
+
+| depth | 4 | 8 | 12 | 16 | 24 | 32 | 48 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| screen-anchored | +3.28 | +4.07 | +4.07 | **+4.10** | +3.78 | +3.59 | +3.27 |
+| object-anchored | +1.71 | +2.49 | +2.95 | +3.23 | +3.31 | **+3.35** | +2.72 |
+
+Averaged over four target frames each. The oldest evidence in a chain of N has been warped N times
+and carries N frames of the flow's error.
+
+### The fix: forget on a horizon
+
+A depth **cap** is a reset — it discards the chain and starts at zero, which oscillates. Decaying
+the carried estimate towards the current observation by `1/32` per frame bounds the horizon and
+keeps the chain. Measured at depth 48:
+
+| horizon | off | 64 | **32** | 16 | 8 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| screen | +3.27 | +4.49 | **+5.28** | +5.97 | +6.01 |
+| ladder | +2.72 | +2.85 | **+2.81** | +2.54 | +1.98 |
+
+End to end:
+
+| | before | after |
+| --- | ---: | ---: |
+| screen-anchored | +1.804 dB, 76% of frames | **+2.296 dB, 84%** |
+| object-anchored ladder | +2.087 dB, 99% | **+2.217 dB, 100%** |
+
+And the pipeline's gain rises with the chain's depth exactly as designed: **+0.84 dB** at depth 0–4,
+**+1.56** at 5–19, **+2.15** at 20 or more.
+
+### Four fixes measured and rejected
+
+- **Anchor the estimate, compose the flows** so the estimate is never cumulatively resampled — the
+  batch solver's arrangement. **Much worse**: 11.51 dB at depth 24 against 28.96. Composed flows
+  drift, and a drifting flow misplaces everything at once rather than blurring it a little.
+- **Skip the warp when nothing moves.** The static tail went from +1.64 dB to −1.11. Folding keeps
+  paying without motion because it re-anchors; freezing removes that.
+- **Decay by forward–backward flow confidence** instead of uniformly — costs 2.24 dB.
+- **Damp the fold** (step 0.5, 0.25) — costs 0.9 and 3.2 dB.
+
+Only the uniform horizon helped, and it is the only one of the four that changes **how long
+evidence lives** rather than how strongly each frame speaks.
+
+### What is left
+
+The block structure inside the region survives even at depths where coverage is complete. That is
+not a coverage problem: the fold restores each block's **mean** and has nothing to say about the
+arrangement *within* a block. Closing that is what a learned restorer is for.
+
+### Limitations
+
+- **Two clips, both synthetic**, and the horizon's optimum differs between them (8–16 against
+  32–64). A frame count is therefore not the governing quantity; accumulated warping error, which
+  grows with motion per frame, is the candidate and two clips cannot confirm it.
+- **The ripple statistic is a share of horizontal spectral energy above the block fundamental.** It
+  separates the arms usefully but has no absolute meaning.
