@@ -132,11 +132,13 @@ the 2 the pipeline does now, on a pipeline already running at 0.63 fps.
 | **+ non-diverging solver — shipped** | **32.543** | **−0.311** | 0.9117 | **42%** |
 | + mask-aware model as well | 32.425 | −0.429 | 0.9127 | 45% |
 
-The mask model is **implemented, tested, and switched off** — it engages at
-`MASK_MODEL_MIN_NEIGHBOURS = 16`, which the window policy's cap of 9 never reaches. That is
-deliberate: on the only content this project can evaluate end to end it costs 0.12 dB, and the
-reason is quantified rather than guessed. It turns on by itself when the window policy is
-re-measured.
+The mask model was **implemented, tested, and switched off** at this point — it needed about 16
+neighbours to pay and the window policy capped K at 9. On the only content the project could
+evaluate end to end it cost 0.12 dB.
+
+> **Superseded the same day.** §8 below replaces the window with an accumulator, which reaches that
+> depth at O(1) cost per frame. The mask model is on, and the numbers in this section are the last
+> ones the batch form produced.
 
 ## 6. What this changes
 
@@ -147,7 +149,7 @@ re-measured.
    forward model before trusting any of D-16.
 3. **Long windows are expensive.** 16+ neighbours is 8× the alignment work. Whether the answer is a
    longer window, evidence accumulated across frames instead of re-aligned per frame, or a learned
-   restorer, is now a design question with numbers attached to it.
+   restorer, is now a design question with numbers attached to it. §8 answers it: the accumulator.
 
 ## 7. Limitations
 
@@ -155,8 +157,84 @@ re-measured.
   which is worth more than a single number, but it is still n=1.
 - **The screen-anchored clip is synthetic in a second way**: the pan is a crop of a real frame, so
   the motion is a pure translation with no parallax, occlusion or object motion.
-- **`MASK_MODEL_MIN_NEIGHBOURS = 16` is the crossover on that one clip.** It will move with mosaic
-  size and motion — the arithmetic says the governing quantity is coverage, not neighbour count, and
-  coverage is what a future version should measure at runtime.
-- **Nobody has looked at the screen-anchored output**, because the pipeline cannot yet produce a
-  meaningful one for it.
+- **16 neighbours is the crossover on that one clip.** It will move with mosaic size and motion —
+  the arithmetic says the governing quantity is coverage, not neighbour count, and coverage is what
+  a future version should measure at runtime. The accumulator sidesteps the threshold by reaching
+  any depth cheaply, but it does not make the quantity go away.
+- **Nobody has looked at the screen-anchored output** at the time of writing. §8 does.
+
+
+---
+
+## 8. The cost, and what replaced the window
+
+**2026-08-23, later.** The window had to grow to about 17 for the corrected model to pay. Measured
+before changing anything:
+
+| neighbours | solve | align | per frame | fps |
+| ---: | ---: | ---: | ---: | ---: |
+| 2 (as shipped) | 294 ms | 219 ms | 634 ms | 1.58 |
+| 8 | 1104 ms | 874 ms | 2100 ms | 0.48 |
+| 16 | 2217 ms | 1748 ms | 4086 ms | **0.24** |
+| 24 | 3444 ms | 2622 ms | 6188 ms | **0.16** |
+
+17× to 25× short of §6.1's ≥4 fps, and **the solver costs more than the alignment** — so "8× the
+alignment work" understated it. Memory was never the constraint: 183 MB for K=17.
+
+### Carrying the evidence instead
+
+One estimate per track, warped by a single frame-to-frame flow each frame, with the new observation
+folded in. One alignment and one warp regardless of how far back the evidence goes.
+
+| | ms/frame | fps |
+| --- | ---: | ---: |
+| pipeline as shipped (K=3) | 634 | 1.58 |
+| **accumulator, unbounded history** | **231** | **4.33** |
+| batch at 16 neighbours | 4287 | 0.23 |
+
+It is also *better*, for a reason already in `docs/phase2-alignment-report.md` §3 — shorter
+baselines align better. The batch form reaches across the whole window; this chains one-frame
+alignments. On 24 frames of history: batch **26.04 dB**, accumulator **28.96 dB**.
+
+### End to end
+
+| | inside the region | vs input | SSIM | frames improved |
+| --- | ---: | ---: | ---: | ---: |
+| **screen-anchored clip** | | | | |
+| mosaicked input | 25.306 | — | 0.7756 | — |
+| batch, K=3 | 25.126 | −0.180 | 0.7675 | 51% |
+| **accumulator** | **27.110** | **+1.804** | **0.8178** | **76%** |
+| **object-anchored ladder clip** | | | | |
+| mosaicked input | 32.854 | — | 0.9144 | — |
+| batch, K=3 | 32.543 | −0.311 | 0.9117 | 42% |
+| **accumulator** | **34.358** | **+1.504** | **0.9248** | **97%** |
+
+It wins on the object-anchored clip too, which no window of 3 could: 1.6% of the region per frame
+is nothing to a window and a third of the region to a chain of 24.
+
+### Looking at it
+
+`artifacts/look_screen.png`. The blocks are **gone** and the structure is back — the vertical bar,
+the diagonal edge, the bright region all return. The replacement carries **directional streaking**
+along the motion, which is what repeated warping leaves behind.
+
+That streak is invisible to PSNR: quality still improves monotonically from 8 to 24 frames of
+history while the streaking gets worse. It is the next thing to attack and it needs an eye or a
+perceptual metric, not this one.
+
+### Two defects the wiring found
+
+- **`target_index` indexes the rolling history buffer**, which stops advancing once the buffer is
+  full. Used as a frame number it restarted the evidence chain on every single frame, while the
+  routing counts looked plausible and no test failed.
+- **`Roi.bounds` is not the rectangle `Roi.crop` returns** — reflect padding is part of the crop.
+  Comparing the wrong rectangles mismatched shapes by exactly the padding. `Roi.crop_bounds` now
+  names the one that means "what the crop covers".
+
+### Limitations, again
+
+- **Two clips, both synthetic.** The screen-anchored one is a crop panning across a real frame, so
+  the motion is a pure translation with no parallax or occlusion.
+- **The streaking has not been quantified**, only seen.
+- **4.33 fps is the measured ROI**; the ladder clip's larger ellipse at 1920×800 runs at 1.0 fps.
+  Detection (119 ms) and one alignment (107 ms) are the whole cost — the accumulator itself is 6 ms.

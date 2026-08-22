@@ -109,28 +109,6 @@ class IbpResult:
         return abs(self.residuals[-2] - self.residuals[-1]) < 1e-3 * max(self.residuals[-1], 1e-9)
 
 
-#: Neighbours needed before modelling the mask pays for itself. **Measured**, not assumed.
-#:
-#: A neighbour ``d`` pixels away exposes a crescent of roughly ``2 * d * ry`` out of an ellipse of
-#: ``pi * rx * ry`` - about ``2 * d / (pi * rx)`` of what the target lost. For a 300 px mosaic and
-#: 4 px per frame that is 1.7% per neighbour, and the measurement matches it to a tenth of a
-#: percent. So the evidence accumulates with the window, and the model that exploits it only starts
-#: winning once enough of the region has been seen:
-#:
-#: ===========  ========  =========  ==========
-#: neighbours   coverage  no mask    mask-aware
-#: ===========  ========  =========  ==========
-#: 2            3.6%      23.22      23.24
-#: 8            14.6%     22.69      22.62
-#: 16           28.1%     22.16      24.68
-#: 24           49.4%     21.65      26.04
-#: ===========  ========  =========  ==========
-#:
-#: Note the directions: more evidence makes the all-masked model *worse* and the mask-aware model
-#: *better*. That is the signature of a forward model that is finally describing the data.
-MASK_MODEL_MIN_NEIGHBOURS = 16
-
-
 def forward_and_adjoint(
     warped: np.ndarray,
     observed: np.ndarray,
@@ -158,6 +136,25 @@ def forward_and_adjoint(
     and the adjoint follows: spread the residual over its block where masked, apply it directly
     where not. The block mean is taken over the masked pixels only, so a block straddling the mask
     boundary is not diluted by pixels that were never averaged.
+
+    **How much this is worth depends on how much of the region has been seen.** A neighbour ``d``
+    pixels away exposes a crescent of roughly ``2 * d / (pi * rx)`` of it - 1.7% per frame for a
+    300 px mosaic at 4 px/frame, and the measurement matches that to a tenth of a percent. So the
+    evidence accumulates, and modelling it only starts winning once enough has arrived:
+
+    ===========  ========  =========  ==========
+    neighbours   coverage  no mask    mask-aware
+    ===========  ========  =========  ==========
+    2            3.6%      23.22      23.24
+    8            14.6%     22.69      22.62
+    16           28.1%     22.16      24.68
+    24           49.4%     21.65      26.04
+    ===========  ========  =========  ==========
+
+    Note the directions: more evidence makes the all-masked model *worse* and this one *better*.
+    That is the signature of a forward model that has started describing the data - and it is why
+    the pipeline accumulates evidence rather than gathering a window of it (D-28), because a
+    window it could afford was never long enough to get here.
     """
     simulated = block_average(warped, spec, phase)
     if mask is not None:

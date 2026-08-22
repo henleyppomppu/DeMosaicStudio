@@ -74,6 +74,19 @@ class Roi:
         left, top, right, bottom = self.reflect
         return self.height + top + bottom, self.width + left + right
 
+    @property
+    def crop_bounds(self) -> tuple[int, int, int, int]:
+        """The rectangle :meth:`crop` corresponds to, in frame coordinates.
+
+        Reflect padding replicates pixels the frame does not have, so this rectangle can extend
+        past the frame - it is virtual, and it exists so two crops taken on different frames can be
+        compared. Carrying an estimate from one ROI to the next needs exactly that (D-28), and
+        using :attr:`bounds` instead silently mismatches the shapes by the padding.
+        """
+        left, top, right, bottom = self.bounds
+        pad_left, pad_top, pad_right, pad_bottom = self.reflect
+        return (left - pad_left, top - pad_top, right + pad_right, bottom + pad_bottom)
+
     def crop(self, frame: np.ndarray) -> np.ndarray:
         """Extracts the aligned crop, reflecting where the frame ran out."""
         left, top, right, bottom = self.bounds

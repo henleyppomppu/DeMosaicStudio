@@ -55,14 +55,7 @@ from .policies import (
 from .post.blend import TemporalAlpha, blend_region
 from .protocol import Stage
 from .roi import build_roi
-from .restore.ibp import (
-    MASK_MODEL_MIN_NEIGHBOURS,
-    FlowObservation,
-    Observation,
-    block_average,
-    reconstruct,
-    reconstruct_flow,
-)
+from .restore.accumulator import EvidenceAccumulator
 from .scene.cuts import detect_cuts, same_scene_span
 from .track.tracker import Track, Tracker
 
@@ -320,6 +313,7 @@ class JobRunner:
             float(_setting(settings, "restoration", "minRestorationConfidence", default=0.0))
         )
         smoother = ConfidenceSmoother()
+        accumulator = EvidenceAccumulator()
 
         # An opt-in, per-region diagnostic trace. This is how the gate's operating point gets
         # measured: without it there is no way to ask which confidence signal predicts whether a
@@ -452,6 +446,7 @@ class JobRunner:
                     luma=luma,
                     history=history,
                     mask_history=mask_history,
+                    frame_index=index,
                     target_index=target_index,
                     anchor_history=anchor_history,
                     same_scene=same_scene,
@@ -461,6 +456,7 @@ class JobRunner:
                     align_conf_min=align_conf_min,
                     gate=gate,
                     smoother=smoother,
+                    accumulator=accumulator,
                     emitter=emitter,
                     context=context,
                 )
@@ -631,6 +627,10 @@ class JobRunner:
         history: list[np.ndarray],
         mask_history: list[np.ndarray],
         target_index: int,
+        #: The frame's own number. `target_index` indexes the rolling history buffer, which
+        #: stops advancing once the buffer is full - using it here restarted the evidence
+        #: chain on every frame while every log line said the window was fine.
+        frame_index: int,
         anchor_history: dict[int, list[AnchorObservation]],
         same_scene: int,
         preset: QualityPreset,
@@ -639,6 +639,7 @@ class JobRunner:
         align_conf_min: float,
         gate: ConfidenceGate,
         smoother: ConfidenceSmoother,
+        accumulator: EvidenceAccumulator,
         emitter: Emitter,
         context: JobContext,
     ) -> "TrackOutcome":
@@ -700,39 +701,33 @@ class JobRunner:
         crop_target = roi.crop(luma)
         target_mask = roi.crop(mask_history[target_index]).astype(bool)
 
-        # **A causal window, not a centred one — a deliberate, documented deviation from §5.6.**
+        # **One alignment, not a window of them.** D-28.
         #
-        # §5.6 centres the window on the target, which needs a look-ahead of K//2 frames: the writer
-        # trails the reader. This pipeline hands each frame to the encoder as it is produced, so only
-        # past frames exist when a frame is restored.
+        # The batch form aligned the target to each of K neighbours and solved over all of them,
+        # which costs K alignments and K times the solver work *per frame*. The corrected forward
+        # model (D-26) needs K of about 17 before it pays, and that measured out at 0.23 fps against
+        # section 6.1's 4 fps target.
         #
-        # Taking K//2 *past* neighbours would leave one neighbour at the measured K=3 and the router
-        # would never reach its two-neighbour minimum — multi-frame would be unreachable while every
-        # log line said the window was 3. So the window keeps its size and spends it backwards.
+        # The accumulator carries one estimate per track forward instead: align to the immediately
+        # preceding frame, warp what has been accumulated, fold in what this frame observed. One
+        # alignment and one warp regardless of how far back the evidence goes -- 4.33 fps measured,
+        # with an unbounded history rather than K.
         #
-        # The cost is a slightly longer maximum baseline (2 frames back rather than 1 each way), and
-        # docs/phase2-alignment-report.md §3 says shorter baselines align better. Implementing the
-        # look-ahead in the media layer is the correct fix and is recorded in CLAUDE.md §6.
-        neighbour_indices = [
-            i
-            for i in range(target_index - (window.effective - 1), target_index)
-            if 0 <= i < len(history)
-        ]
+        # It is also better, for a reason already in docs/phase2-alignment-report.md section 3:
+        # shorter baselines align better. This chains one-frame alignments where the batch form
+        # reached across the whole window.
+        previous_index = target_index - 1
+        alignments: list[Any] = []
 
-        alignments = []
-        neighbour_crops = []
-        neighbour_masks = []
-        for index in neighbour_indices:
-            crop = roi.crop(history[index])
-            neighbour_crops.append(crop)
-            # Each neighbour's own mask, in its own coordinates, cropped by the same rectangle as
-            # its pixels. Where it is False the neighbour saw the scene directly.
-            neighbour_masks.append(roi.crop(mask_history[index]).astype(bool))
+        if 0 <= previous_index < len(history):
             try:
-                alignments.append(self._align(crop_target, crop))
+                alignments.append(self._align(crop_target, roi.crop(history[previous_index])))
             except Exception as exc:  # noqa: BLE001 - alignment failure degrades, never fails
                 emitter.warn(E4002, f"alignment failed: {exc}", track=track.track_id)
                 alignments.append(None)
+
+        # The neighbour's own mask is not needed: its evidence is already inside the accumulated
+        # estimate, and the operator has to describe how *this* frame observed the scene.
 
         usable = [a for a in alignments if a is not None and a.usable_fraction >= align_conf_min]
         scored = [a.usable_fraction for a in alignments if a is not None]
@@ -755,6 +750,55 @@ class JobRunner:
         if withheld:
             context.regions_gated += 1
 
+        # The grid phase is measured in frame coordinates, so it has to be re-expressed relative
+        # to the crop's own origin before the operator is applied to the crop.
+        phase = profile.phase_for(left, top)
+        crop_left, crop_top = roi.bounds[0], roi.bounds[1]
+        phase = (
+            (phase[0] + crop_left) % profile.block_width,
+            (phase[1] + crop_top) % profile.block_height,
+        )
+
+        # **Fold first, route second.** The accumulator costs about 6 ms; withholding the update
+        # until the router approves would mean a track that is gated for three frames arrives at
+        # the fourth with no history, which is the deadlock the batch form did not have. Evidence
+        # is gathered whenever it can be; the router decides whether the *result* is composited.
+        try:
+            estimate = accumulator.update(
+                track.track_id,
+                frame_index=frame_index,
+                observation=crop_target,
+                previous_observation=(
+                    roi.crop(history[previous_index])
+                    if 0 <= previous_index < len(history)
+                    else None
+                ),
+                # crop_bounds, not bounds: the reflect padding is part of the crop, and comparing
+                # the two rectangles is how an estimate survives the ROI moving with the region.
+                bounds=roi.crop_bounds,
+                mask=target_mask,
+                spec=profile,
+                phase=phase,
+                flow_to_previous=usable[0].target_to_neighbour if usable else None,
+                same_scene=same_scene > 1,
+            )
+        except Exception as exc:  # noqa: BLE001 - section 5.8.2: degrade, never emit a partial composite
+            emitter.warn(
+                E4002,
+                f"accumulation failed: {exc}",
+                track=track.track_id,
+                band=band_for(profile.block_size),
+            )
+            accumulator.reset(track.track_id)
+            return TrackOutcome(
+                route(RouteInputs(degradation_chain_exhausted=True)), None, confidence, roi, profile
+            )
+
+        # With an accumulator, "how many neighbours are aligned right now" is the wrong question.
+        # The evidence is the depth of the chain, and the router's minimum reads naturally against
+        # it: two observations folded in is one neighbour's worth of evidence.
+        evidence = max(accumulator.depth(track.track_id) - 1, 0)
+
         decision = route(
             RouteInputs(
                 has_region=True,
@@ -765,69 +809,20 @@ class JobRunner:
                 anchor=anchor,
                 motion_pixels_per_frame=track.speed,
                 window=window,
-                valid_aligned_neighbours=len(usable),
+                valid_aligned_neighbours=evidence,
                 mean_alignment_confidence=mean_alignment,
                 align_conf_min=align_conf_min,
             )
         )
 
         if decision.path is RestorationPath.PASS_THROUGH:
+            # A withheld frame still keeps its evidence: the region is unchanged, the chain is not
+            # broken, and dropping it would restart accumulation every time the gate blinked.
             return TrackOutcome(
-                decision, None, confidence, roi, profile, mean_alignment, len(usable)
+                decision, None, confidence, roi, profile, mean_alignment, evidence
             )
 
-        # The grid phase is measured in frame coordinates, so it has to be re-expressed relative to
-        # the crop's own origin before the operator is applied to the crop.
-        phase = profile.phase_for(left, top)
-        crop_left, crop_top = roi.bounds[0], roi.bounds[1]
-        phase = (
-            (phase[0] + crop_left) % profile.block_width,
-            (phase[1] + crop_top) % profile.block_height,
-        )
-
-        try:
-            if decision.path is RestorationPath.MULTI_FRAME and usable:
-                # The mask model needs evidence before it earns its extra sensitivity: it trusts a
-                # neighbour's unmasked pixels as direct observations, which is worth several dB
-                # once enough of the region has been seen clean and costs about 0.1 dB when almost
-                # none of it has. The window policy caps K at 9 today, so this is currently never
-                # taken - deliberately, and it turns on by itself when the policy is re-measured
-                # against the corrected forward model. See MASK_MODEL_MIN_NEIGHBOURS.
-                enough_evidence = len(usable) >= MASK_MODEL_MIN_NEIGHBOURS
-                observations_flow = [
-                    FlowObservation.target(crop_target, target_mask if enough_evidence else None)
-                ]
-                observations_flow.extend(
-                    FlowObservation(
-                        crop,
-                        a.target_to_neighbour,
-                        a.neighbour_to_target,
-                        a.confidence,
-                        neighbour_mask if enough_evidence else None,
-                    )
-                    for crop, neighbour_mask, a in zip(
-                        neighbour_crops, neighbour_masks, alignments, strict=True
-                    )
-                    if a is not None and a.usable_fraction >= align_conf_min
-                )
-                restored = reconstruct_flow(observations_flow, profile, phase, iterations=20).image
-            else:
-                restored = reconstruct(
-                    [Observation(crop_target, 0.0, 0.0)],
-                    profile,
-                    phase,
-                    iterations=20,
-                ).image
-        except Exception as exc:  # noqa: BLE001 - §5.8.2: degrade, never emit a partial composite
-            emitter.warn(
-                E4002,
-                f"restoration failed: {exc}",
-                track=track.track_id,
-                band=band_for(profile.block_size),
-            )
-            return TrackOutcome(
-                route(RouteInputs(degradation_chain_exhausted=True)), None, confidence, roi, profile
-            )
+        restored = estimate
 
         # Back to the frame's coordinates, minus the alignment padding (§5.5.3).
         pad_left, pad_top, pad_right, pad_bottom = roi.reflect
@@ -837,7 +832,7 @@ class JobRunner:
         ]
 
         return TrackOutcome(
-            decision, trimmed, confidence, roi, profile, mean_alignment, len(usable)
+            decision, trimmed, confidence, roi, profile, mean_alignment, evidence
         )
 
 

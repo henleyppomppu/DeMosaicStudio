@@ -655,3 +655,78 @@ arithmetic to a tenth of a percent.
 - The screen-anchored clip is synthetic in a second way: the pan is a crop of a real frame, so the
   motion is a pure translation with no parallax, occlusion or object motion. It exercises the
   mechanism; it does not represent real footage.
+
+---
+
+## D-28 — Evidence is carried forward, not re-gathered every frame
+
+**Status:** accepted (2026-08-23) · **Supersedes:** the batch window of §5.6 · **Closes:** the first
+positive end-to-end result this project has produced
+
+### Context
+
+The corrected forward model (D-26) needs about 17 neighbours before it pays, because a neighbour one
+frame away exposes only `2·d / (π·rx)` of the region — 1.7% for a 300 px mosaic at 4 px/frame. The
+batch form gathers that window afresh for every frame, so it costs K alignments and K times the
+solver work per frame. Measured:
+
+| neighbours | solve | align | per frame | fps |
+| ---: | ---: | ---: | ---: | ---: |
+| 2 (today) | 294 ms | 219 ms | 634 ms | 1.58 |
+| 16 | 2217 ms | 1748 ms | 4086 ms | **0.24** |
+| 24 | 3444 ms | 2622 ms | 6188 ms | **0.16** |
+
+Against §6.1's ≥4 fps target that is 17× to 25× too slow, and the solver costs *more* than the
+alignment — so "8× the alignment work" understated it.
+
+### Decision
+
+One estimate per track, carried forward. Each frame it is warped by a **single** frame-to-frame
+flow and the new observation is folded in. The cost is one alignment and one warp regardless of how
+far back the evidence goes, and the history is unbounded rather than K.
+
+The router's "how many neighbours are aligned right now" becomes "how deep is the chain", which is
+the same question asked of a structure that has an answer.
+
+### Consequences
+
+**It is faster.** 231 ms per frame against 634 ms — **4.33 fps** on the measured ROI, the first time
+this pipeline has met §6.1's MVP target.
+
+**It is also better**, for a reason `docs/phase2-alignment-report.md` §3 already measured: shorter
+baselines align better. The batch form reaches across the whole window; this chains one-frame
+alignments.
+
+| | inside the region | vs input | SSIM | frames improved |
+| --- | ---: | ---: | ---: | ---: |
+| **screen-anchored clip** | | | | |
+| mosaicked input | 25.306 | — | 0.7756 | — |
+| batch, K=3 | 25.126 | −0.180 | 0.7675 | 51% |
+| **accumulator** | **27.110** | **+1.804** | **0.8178** | **76%** |
+| **object-anchored ladder clip** | | | | |
+| mosaicked input | 32.854 | — | 0.9144 | — |
+| batch, K=3 (shipped yesterday) | 32.543 | −0.311 | 0.9117 | 42% |
+| **accumulator** | **34.358** | **+1.504** | **0.9248** | **97%** |
+
+It wins on the object-anchored clip too, which the batch form could not: 1.6% of the region per
+frame is nothing to a window of 3 and a third of the region to a chain of 24.
+
+**Looking at it**, the blocks are gone and the structure is back — and the replacement carries
+**directional streaking**, which is what repeated warping along the motion leaves behind. That is
+the next thing to attack, and it is a far better problem than the one before it.
+
+**The resets are the correctness.** A scene cut, a dropped frame, a track that jumped or a lost
+alignment all mean the accumulated pixels are about different content, and compositing them would
+put one shot's picture into another. Each is a guard test in `test_accumulator.py`.
+
+**Two defects the wiring found**, both invisible from the outside:
+
+- `target_index` indexes the *rolling history buffer*, which stops advancing once the buffer is
+  full. Using it as a frame number restarted the chain on every frame while the logs looked normal.
+- The ROI applies reflect padding, so `Roi.bounds` is not the rectangle `Roi.crop` returns.
+  Comparing the wrong rectangles mismatched shapes by the padding. `Roi.crop_bounds` now names the
+  one that means "what the crop covers".
+
+**§5.6's window is now mostly vestigial.** It still gates *whether* multi-frame runs — through the
+motion band and the object-anchored rule — but its size no longer sets how much evidence is used.
+`WINDOW_BY_MOTION` and the cap of 9 should be re-read in that light rather than trusted.
