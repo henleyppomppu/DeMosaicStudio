@@ -49,4 +49,5 @@ Warnings worth knowing about:
 | --- | --- |
 | W4102 | A region was **left untouched** because its restoration confidence fell below `minRestorationConfidence` (§5.8.1). The output at that region is the original source pixels |
 | W4103 | A requested `temporalWindow` was reduced by a safety rule (scene cut, object-anchored grid, VRAM ladder, stream boundary). Carries the rule and the effective K (§5.6.1) |
+| W5102 | A job restored nothing but **could not stream-copy** (no ffmpeg available), so the output was re-encoded and is slightly softer than the source (R-1.8a, D-22) |
 | W6101 | A backend or precision was substituted — e.g. a saved `float16` re-resolved for the CPU path (§5.17b) |

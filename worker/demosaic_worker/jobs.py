@@ -17,6 +17,7 @@ latency, not a stall (§5.6).
 from __future__ import annotations
 
 import json
+import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -28,7 +29,18 @@ from .analyze.estimator import AnchorObservation, estimate_anchor, estimate_geom
 from .analyze.motion import classify
 from .analyze.profile import GridAnchor, MosaicProfile, band_for
 from .detect.regions import Region, extract_regions
-from .errors import E1001, E3001, E3002, E4002, W3101, W4102, W4103, WorkerError
+from .errors import (
+    E1001,
+    E3001,
+    E3002,
+    E4002,
+    E7006,
+    W3101,
+    W4102,
+    W4103,
+    W5102,
+    WorkerError,
+)
 from .media.probe import probe as probe_media
 from .messages import Emitter
 from .policies import (
@@ -77,6 +89,7 @@ class JobContext:
     resume: bool = False
     comparison_pts: list[int] = field(default_factory=list)
     analyze_only: bool = False
+    sample_every: int = 1
 
     cancelled: bool = False
     paused: bool = False
@@ -85,10 +98,12 @@ class JobContext:
     frames_seen: int = 0
     frames_restored: int = 0
     frames_passed_through: int = 0
+    frames_with_regions: int = 0
     regions_detected: int = 0
     regions_gated: int = 0
     route_reasons: dict[str, int] = field(default_factory=dict)
     confidences: list[float] = field(default_factory=list)
+    passthrough: bool = False
 
     def note_route(self, reason: str) -> None:
         """Counts a routing reason for the job summary. A router that cannot explain itself…"""
@@ -105,7 +120,12 @@ class JobContext:
             "regionsGated": self.regions_gated,
             "routeReasons": dict(sorted(self.route_reasons.items())),
             "confidenceMean": round(mean_confidence, 4),
-            "passthrough": self.regions_detected == 0,
+            "framesWithRegions": self.frames_with_regions,
+            # Set by the runner once it knows what it actually wrote. It used to be
+            # `regions_detected == 0`, which was a claim about the *decision* rather than about the
+            # bytes: the video was fully re-encoded either way, and the summary said it had not
+            # been. R-1.8a is a stream copy or it is nothing.
+            "passthrough": self.passthrough,
             "synthetic": self.frames_restored > 0,
         }
 
@@ -263,6 +283,11 @@ class JobRunner:
         if not source.exists():
             raise WorkerError(E1001, f"source not found: {source.name}")
 
+        if not context.analyze_only and not context.output_path:
+            # `analyze` writes nothing by design, so only `process` needs a destination. Without
+            # this the empty string became Path("") and failed much later, inside the muxer.
+            raise WorkerError(E7006, "process requires an outputPath")
+
         settings = context.settings
         preset = QualityPreset(_setting(settings, "restoration", "preset", default="Balanced"))
         window_setting = _setting(settings, "restoration", "temporalWindow", default="auto")
@@ -293,7 +318,12 @@ class JobRunner:
         info = probe_media(source)
         total = int((info.duration_seconds or 0) * float(info.nominal_fps or 24)) or None
 
-        from .media.passthrough import run_passthrough
+        from .media.passthrough import (
+            StreamCopyUnavailable,
+            run_analysis,
+            run_passthrough,
+            run_stream_copy,
+        )
 
         # A sliding window in presentation order (§5.6). The transform below sees each frame with
         # its already-decoded neighbours; the media layer carries the timeline.
@@ -344,9 +374,29 @@ class JobRunner:
             context.regions_detected += len(regions)
             tracks = tracker.update(regions)
 
-            if not any(t.is_restorable and t.region is not None for t in tracks):
+            restorable = [t for t in tracks if t.is_restorable and t.region is not None]
+
+            if not restorable:
                 context.frames_passed_through += 1
                 context.note_route("NoRegion")
+                return None
+
+            # The protocol defines `analyze` as detection and tracking only. Everything below is
+            # restoration, and running it to throw the pixels away made the preview cost more than
+            # the job it previews (162 s against 153 s, measured).
+            if context.analyze_only:
+                context.frames_with_regions += 1
+                context.note_route("AnalyzedOnly")
+                if index % 8 == 0:
+                    fraction = (index / total) if total else 0.0
+                    elapsed = max(time.time() - started, 1e-6)
+                    emitter.progress(
+                        context.job_id,
+                        Stage.ANALYZING,
+                        min(fraction, 0.99),
+                        pts=int(frame.pts) if frame.pts is not None else None,
+                        fps=round((index + 1) / elapsed, 2),
+                    )
                 return None
 
             changes = detect_cuts(history) if len(history) > 1 else []
@@ -359,10 +409,7 @@ class JobRunner:
             output = luma.copy()
             touched = False
 
-            for track in tracks:
-                if not track.is_restorable or track.region is None:
-                    continue
-
+            for track in restorable:
                 outcome = self._restore_track(
                     track=track,
                     luma=luma,
@@ -435,21 +482,69 @@ class JobRunner:
 
         if context.analyze_only:
             emitter.progress(context.job_id, Stage.ANALYZING, 0.0, force=True)
-            # Analysis reuses the same transform and simply discards the pixels.
-            result = run_passthrough(
-                source, Path(context.output_path or str(source) + ".analysis.mp4"),
-                transform=transform, preset="ultrafast", crf=40,
+            analysis = run_analysis(
+                source,
+                transform=transform,
+                sample_every=max(1, int(context.sample_every or 1)),
             )
-        else:
-            emitter.progress(context.job_id, Stage.RESTORING, 0.0, force=True)
+
+            emitter.progress(context.job_id, Stage.FINALIZING, 1.0, force=True)
+            summary = context.summary()
+            # The transform only runs on sampled frames, so its own counter undercounts the file.
+            # The decoder saw all of them.
+            summary["framesSeen"] = analysis.frames_seen
+            summary["framesExamined"] = analysis.frames_examined
+            summary["regionsGated"] = gate.gated_track_count
+            # No file was written, so there is no output timeline to compare. Saying "preserved"
+            # here would be asserting something about bytes that do not exist.
+            summary["timeline"] = f"analysis only, {analysis.frames_examined} frames examined"
+            return summary
+
+        emitter.progress(context.job_id, Stage.RESTORING, 0.0, force=True)
+
+        # Encode to a sibling first. R-1.8a can only be decided once the whole file has been seen,
+        # and staging keeps that decision cheap: a job that turns out to have restored nothing
+        # discards this and stream-copies instead. It also means a crash mid-encode never leaves a
+        # truncated file sitting at the destination looking finished.
+        destination = Path(context.output_path)
+        # The extension has to survive: PyAV picks the muxer from it, and a staging name of
+        # "out.mp4.part" fails with "Could not determine output format".
+        staging = destination.with_name(f"{destination.stem}.part{destination.suffix}")
+
+        try:
             result = run_passthrough(
                 source,
-                Path(context.output_path),
+                staging,
                 transform=transform,
                 encoder=_encoder_for(settings),
                 crf=int(_setting(settings, "encode", "constantQuality", default=18)),
                 preset=_setting(settings, "encode", "preset", default="medium"),
             )
+
+            if context.frames_restored == 0:
+                # R-1.8a. A full re-encode at the transparent operating point still costs about
+                # 2.9 dB across the whole frame (docs/untouched-decomposition.json), and a file
+                # the pipeline never touched has nothing to show for paying it.
+                emitter.progress(context.job_id, Stage.FINALIZING, 0.5, force=True)
+                try:
+                    result = run_stream_copy(source, destination)
+                    context.passthrough = True
+                    staging.unlink(missing_ok=True)
+                except StreamCopyUnavailable as reason:
+                    # Keep the re-encode rather than failing the job - but say so. The defect this
+                    # replaced was a summary that reported passthrough while re-encoding; falling
+                    # back silently would restore it exactly.
+                    emitter.warn(
+                        W5102,
+                        f"restored nothing, but could not stream-copy: {reason}. "
+                        "The output was re-encoded and is slightly softer than the source.",
+                    )
+                    os.replace(staging, destination)
+            else:
+                os.replace(staging, destination)
+        except BaseException:
+            staging.unlink(missing_ok=True)
+            raise
 
         emitter.progress(context.job_id, Stage.FINALIZING, 1.0, force=True)
 

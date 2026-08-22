@@ -72,6 +72,7 @@ public static class ErrorCodes
     public static readonly ErrorCode W4102 = Warning("W4102", "Region left untouched: confidence below minRestorationConfidence");
     public static readonly ErrorCode W4103 = Warning("W4103", "Requested temporalWindow reduced by a safety rule");
     public static readonly ErrorCode W5101 = Warning("W5101", "Stream dropped for container compatibility");
+    public static readonly ErrorCode W5102 = Warning("W5102", "Stream copy unavailable; output was re-encoded");
     public static readonly ErrorCode W6101 = Warning("W6101", "Backend substituted");
 
     private static readonly ErrorCode[] AllCodes =
@@ -84,7 +85,7 @@ public static class ErrorCodes
         E6001, E6002, E6003, E6004, E6005,
         E7001, E7002, E7003, E7004, E7005, E7006,
         E9001,
-        W1101, W3101, W4101, W4102, W4103, W5101, W6101,
+        W1101, W3101, W4101, W4102, W4103, W5101, W5102, W6101,
     ];
 
     private static readonly FrozenDictionary<string, ErrorCode> ByCode =

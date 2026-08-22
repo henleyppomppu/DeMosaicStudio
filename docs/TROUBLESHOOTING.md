@@ -50,12 +50,23 @@ that are not implemented yet say so rather than offering invented remedies.
 | E4401 | Job fails after the OOM ladder | VRAM exhausted at every step | Lower the VRAM budget or the preset. Output is discarded rather than left partially composited |
 | W4102 | "N regions left untouched" in the summary | `minRestorationConfidence` withheld them (§5.8.1) | Working as configured. Lower the threshold to restore them, accepting weaker evidence |
 | W4103 | Effective K smaller than requested | A safety rule reduced it: scene cut, object-anchored grid, VRAM, or stream boundary | Expected. The reason is carried in the warning |
+| W5102 | "could not stream-copy" on a job that restored nothing | No ffmpeg on this machine - `tools/ffmpeg` is gitignored and is part of the install, not the checkout | Install `tools/ffmpeg`, or set `DEMOSAIC_FFMPEG`. The output is usable either way, just re-encoded and about 2.9 dB softer (D-22) |
 
 **Restoration produced output that looks worse than the source.** Check the diagnostic overlay for
 grid anchoring and motion band. Object-anchored multi-frame is measurably harmful
 (`docs/phase0-report.md` §3.2) and so is multi-frame on fast-motion content
 (`docs/phase2-alignment-report.md` §3). Both should have been gated by §5.8; if they were not, that
 is a router bug, not a tuning problem.
+
+**The output is a whole new file even though nothing was detected.** Check `passthrough` in the
+summary. When it is `true` the video bitstream is byte-identical to the source and only the
+container was rewritten, so the file size and hash of the *video stream* match; the container bytes
+legitimately differ. When it is `false` on a job that restored nothing, look for W5102 above.
+
+**A detector that fires on clean footage costs more than a few wrong pixels.** It also takes the
+pass-through away: on one clean corpus clip the detector found 48 regions across 96 frames, so the
+file was fully re-encoded for nothing. Pass-through is worth exactly as much as the false-positive
+rate allows (`docs/untouched-decomposition.json`).
 
 ## Resume and checkpoints (§9)
 

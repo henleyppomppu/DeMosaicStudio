@@ -115,6 +115,7 @@ class Worker:
             resume=bool(request.get("resume", False)),
             comparison_pts=[int(p) for p in (request.get("comparisonPts") or [])],
             analyze_only=analyze_only,
+            sample_every=max(1, int(request.get("sampleEvery") or 1)),
         )
         self.current = context
 

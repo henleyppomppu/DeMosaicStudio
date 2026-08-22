@@ -67,7 +67,7 @@ Changing the protocol follows `AGENTS.md`: bump the version → change both side
 | --- | --- | --- |
 | `hello` | Handshake | `hostVersion`, `protocolVersion` |
 | `probe` | Media and hardware inspection, no processing | `sourcePath` |
-| `analyze` | Detection and tracking only; produces the region summary for §5.2.5c | `jobId`, `sourcePath`, `settings`, `sampleEvery` |
+| `analyze` | Detection and tracking only; produces the region summary for §5.2.5c. Writes **no file** and does not restore. `sampleEvery` examines every Nth frame | `jobId`, `sourcePath`, `settings`, `sampleEvery` |
 | `process` | Full pipeline | `jobId`, `sourcePath`, `outputPath`, `settings`, `resume`, `comparisonPts[]` |
 | `preview` | Render one frame, original and restored | `jobId`, `pts`, `settings`, `overlay` |
 | `pause` / `resume` | Suspend / continue | `jobId` |
@@ -87,6 +87,29 @@ Changing the protocol follows `AGENTS.md`: bump the version → change both side
 | `previewResult` | Rendered preview | `pts`, `originalPath`, `restoredPath`, `regions[]` |
 | `result` | **Terminal for a job** | `status: completed\|cancelled\|failed`, `summary{}`, `error?` |
 | `error` | Failure detail | `code`, `recoverable`, `message`, `context{}` |
+
+## The `result` summary
+
+| Field | Meaning |
+| --- | --- |
+| `framesSeen` | Frames the **decoder** saw. Under `sampleEvery` this still counts the whole file |
+| `framesExamined` | `analyze` only — frames actually handed to the detector |
+| `framesRestored` | Frames whose pixels were changed |
+| `framesPassedThrough` | Frames written unchanged |
+| `framesWithRegions` | `analyze` only — frames carrying at least one restorable track |
+| `regionsDetected` | Regions across the whole job, before gating |
+| `regionsGated` | Regions withheld for confidence below `minRestorationConfidence` (W4102) |
+| `routeReasons{}` | Counts per routing reason, from the closed enum. A router that cannot explain itself cannot be debugged from a log |
+| `confidenceMean` | Mean restoration confidence over applied restorations |
+| `timeline` | The §5.1.7 check, or `analysis only, N frames examined` when nothing was written |
+| `frameCountPreserved` | `process` only. Absent for `analyze`, which writes no file |
+| `passthrough` | **The video stream was stream-copied and is byte-identical to the source** (R-1.8a) |
+| `synthetic` | Whether the output contains estimated pixels (§1.3). Always `false` for `analyze` |
+
+`passthrough` is a statement about bytes, not about a decision. It used to be
+`regionsDetected == 0`, which was true of the decision and false of the file — the video was fully
+re-encoded either way. If a stream copy is impossible on this machine the field stays `false` and
+**W5102** explains why (D-22).
 
 ## Progress contract
 

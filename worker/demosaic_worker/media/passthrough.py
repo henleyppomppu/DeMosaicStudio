@@ -20,6 +20,9 @@ Two rules from the PRD are enforced here rather than hoped for:
 
 from __future__ import annotations
 
+import os
+import shutil
+import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from fractions import Fraction
@@ -177,6 +180,169 @@ def run_passthrough(
             result.output_time_base = Fraction(out_video.time_base)
 
     # Encoders emit packets in decode order; the timeline check compares presentation order.
+    result.output_pts.sort()
+
+    return result
+
+
+@dataclass(slots=True)
+class AnalysisResult:
+    """What one detection pass saw. prd.md §8.3 ``analyze``, §5.2.5c."""
+
+    frames_seen: int = 0
+    frames_examined: int = 0
+    source_pts: list[int] = field(default_factory=list)
+
+    @property
+    def is_variable_frame_rate(self) -> bool:
+        return is_variable_frame_rate(self.source_pts)
+
+
+def run_analysis(
+    source: Path,
+    *,
+    transform: FrameTransform,
+    sample_every: int = 1,
+) -> AnalysisResult:
+    """Decodes ``source`` and hands each sampled frame to ``transform``. Writes nothing.
+
+    The protocol defines ``analyze`` as "detection and tracking only" (§8.3). Running it through
+    :func:`run_passthrough` and discarding the pixels satisfies the letter of that and none of the
+    point: the run still encoded a whole video to a throwaway file, and it still paid for
+    restoration. Measured, the analysis of a 96-frame clip took 162 s against 153 s for the real
+    job — a preview that costs more than the thing it previews is not a preview, and §5.2.5c wants
+    it precisely so the user can see what would be altered *before* committing to it.
+
+    ``sample_every`` skips frames, which the protocol allows for the same reason: a region summary
+    does not need every frame to be accurate about where the mosaics are.
+
+    The transform's return value is ignored — there is nowhere for a frame to go.
+    """
+    if sample_every < 1:
+        raise WorkerError(E5002, f"sampleEvery must be at least 1, got {sample_every}")
+
+    result = AnalysisResult()
+
+    with _open_input(source) as container:
+        if not container.streams.video:
+            raise WorkerError(E1005, "source has no video stream", path=str(source))
+
+        stream = container.streams.video[0]
+        stream.thread_type = "AUTO"
+
+        for frame in container.decode(stream):
+            if frame.pts is None:
+                continue
+
+            result.source_pts.append(frame.pts)
+            index = result.frames_seen
+            result.frames_seen += 1
+
+            if index % sample_every:
+                continue
+
+            result.frames_examined += 1
+            transform(frame, index)
+
+    return result
+
+
+class StreamCopyUnavailable(RuntimeError):
+    """No tool on this machine can remux without re-encoding. Raised, never swallowed."""
+
+
+def find_ffmpeg() -> Path | None:
+    """Locates an ffmpeg executable, or returns ``None``.
+
+    ``tools/ffmpeg`` is gitignored - it is part of the machine, not the repository - so this can
+    legitimately find nothing on a fresh checkout or in CI. Callers must handle that rather than
+    assume the binary is there.
+    """
+    override = os.environ.get("DEMOSAIC_FFMPEG")
+    if override and Path(override).exists():
+        return Path(override)
+
+    bundled = Path(__file__).resolve().parents[3] / "tools" / "ffmpeg" / "bin" / "ffmpeg.exe"
+    if bundled.exists():
+        return bundled
+
+    found = shutil.which("ffmpeg")
+    return Path(found) if found else None
+
+
+def run_stream_copy(
+    source: Path,
+    destination: Path,
+    *,
+    copy_audio: bool = True,
+) -> PassthroughResult:
+    """Remuxes ``source`` into ``destination`` without decoding or re-encoding anything.
+
+    R-1.8a: a job that restores nothing must not re-encode. A full re-encode at the transparent
+    operating point still costs about 2.9 dB across the whole frame
+    (``docs/untouched-decomposition.json``), so a file the pipeline had no reason to touch would
+    come back measurably softer for no benefit at all.
+
+    **This shells out to ffmpeg, and it has to.** PyAV cannot remux a video stream: its
+    ``add_stream_from_template`` builds an *encoder*-backed stream (``libx264``, ``is_encoder=1``),
+    and muxing demuxed packets through it writes one byte per packet - a 23 KB video stream comes
+    out as 21 bytes and does not decode at all. Measured on PyAV 14.0.1, in both MP4 and Matroska,
+    with and without the extradata copied across. Audio survives the same call, which is why the
+    audio pass-through in :func:`run_passthrough` has always been correct and this one could not be
+    written the same way.
+
+    Raises :class:`StreamCopyUnavailable` when no ffmpeg is present. The caller decides what to do
+    about it; quietly re-encoding instead is what R-1.8a exists to prevent.
+    """
+    ffmpeg = find_ffmpeg()
+    if ffmpeg is None:
+        raise StreamCopyUnavailable(
+            "no ffmpeg executable found (looked at DEMOSAIC_FFMPEG, tools/ffmpeg, PATH)"
+        )
+
+    if not source.exists():
+        raise WorkerError(E1001, f"source not found: {source}", path=str(source))
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+
+    command = [
+        str(ffmpeg), "-y", "-loglevel", "error",
+        "-i", str(source),
+        "-map", "0" if copy_audio else "0:v",
+        "-c", "copy",
+        str(destination),
+    ]
+    completed = subprocess.run(command, capture_output=True, text=True)
+
+    if completed.returncode != 0 or not destination.exists():
+        raise WorkerError(
+            E5002,
+            f"stream copy failed: {completed.stderr.strip()[:200] or 'ffmpeg produced no output'}",
+            path=str(destination),
+        )
+
+    # Read the timeline back off both files rather than assuming a copy preserved it. A stream copy
+    # that silently retimed would be exactly the kind of failure section 5.1.7 exists to catch.
+    result = PassthroughResult()
+
+    with _open_input(source) as container:
+        stream = container.streams.video[0]
+        result.source_time_base = Fraction(stream.time_base)
+        result.source_pts = [
+            packet.pts for packet in container.demux(stream)
+            if packet.dts is not None and packet.pts is not None
+        ]
+
+    with _open_input(destination) as container:
+        stream = container.streams.video[0]
+        result.output_time_base = Fraction(stream.time_base)
+        result.output_pts = [
+            packet.pts for packet in container.demux(stream)
+            if packet.dts is not None and packet.pts is not None
+        ]
+
+    result.frames_passed_through = len(result.output_pts)
+    result.source_pts.sort()
     result.output_pts.sort()
 
     return result

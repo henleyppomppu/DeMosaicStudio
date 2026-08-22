@@ -390,3 +390,93 @@ down by half a level. Now `np.rint` then cast.
 **Reversal cost: Low.** One function's input and output handling.
 
 **Date:** 2026-08-22.
+
+---
+
+## D-22 — A stream copy shells out to ffmpeg, because PyAV cannot remux video
+
+**Status:** accepted (2026-08-22) · **Closes:** R-1.8a, `T-IO-PASSTHROUGH-COPY-01`
+
+### Context
+
+R-1.8a says a job that restores nothing must stream-copy rather than re-encode. Until now the
+summary reported `passthrough: regions_detected == 0` and the video was fully re-encoded either
+way — a claim about the *decision*, not about the bytes. There were no tests on the job runner at
+all, so nothing noticed.
+
+The cost of getting this wrong is measured, not assumed: re-encoding at the operating point the
+project itself calls transparent still costs **2.94 dB across the whole frame**
+(`docs/untouched-decomposition.json`). A file the pipeline had no reason to touch came back
+measurably softer for nothing.
+
+### The obstacle
+
+The natural implementation — PyAV's `add_stream_from_template` plus muxing the demuxed packets —
+**silently produces a broken file**. Measured on PyAV 14.0.1:
+
+| | video bytes in | video bytes out |
+| --- | ---: | ---: |
+| MP4 → MP4 | 23,062 | **21** |
+| MP4 → Matroska | 23,062 | **0** |
+| audio (Matroska → Matroska) | 1,324 | 1,324 |
+
+One byte per packet, and the result does not decode (`InvalidDataError`). The output stream that
+`add_stream_from_template` builds for video is **encoder**-backed (`libx264`, `is_encoder=1`), and
+muxing raw packets through it does not write them. Copying the extradata across and constructing the
+stream by codec name both fail identically.
+
+Audio survives the same call, which is why the audio pass-through in `run_passthrough` has always
+been correct and why this could not simply be written the same way.
+
+### Decision
+
+`run_stream_copy` invokes `ffmpeg -c copy` and then reads the timeline back off **both** files
+rather than assuming a copy preserved it.
+
+`tools/ffmpeg` is gitignored — it is part of the machine, not the repository — so a fresh checkout
+may have no ffmpeg. In that case the copy raises `StreamCopyUnavailable`, the runner keeps the
+re-encoded output, and it emits **W5102**. It never reports a pass-through it did not perform;
+reporting one is the defect this replaced.
+
+### Consequences
+
+- The pass-through path depends on an external binary and is skipped in CI. The skip says so.
+- `test_pyav_still_cannot_remux_video_on_its_own` pins the reason for the shell-out. If a future
+  PyAV fixes remuxing, that test fails and the decision can be revisited — which is its purpose.
+- **How often this fires is set by the detector, not by this decision.** On a clean corpus clip the
+  detector found 48 regions across 96 frames and the file was re-encoded; on another it found none
+  and came back bit-identical. Pass-through is worth exactly as much as the false-positive rate
+  allows.
+
+---
+
+## D-23 — `analyze` is detection and tracking only, and writes nothing
+
+**Status:** accepted (2026-08-22) · **Closes:** §8.3, §5.2.5c
+
+### Context
+
+The protocol has always defined `analyze` as "detection and tracking only". The implementation ran
+the **entire restoration** and discarded the pixels, then encoded the untouched frames to a
+throwaway file — at `output_path or <source>.analysis.mp4`, so a preview with no output path wrote
+a video next to the user's source.
+
+Measured on a 96-frame clip: **162 s to analyze, 153 s to process.** A preview that costs more than
+the job it previews is not a preview, and §5.2.5c wants it precisely so the user can see what would
+be altered *before* committing. R-04 lists that preview as the mitigation for false positives
+altering clean footage — the risk this project has measured as its largest.
+
+### Decision
+
+The transform returns immediately after tracking when the job is an analysis. A new media-layer
+entry point, `run_analysis`, decodes and hands frames to the transform without ever opening an
+encoder. `sampleEvery` — in the protocol table since v1.0 and accepted by nobody — is honoured.
+
+### Consequences
+
+- **162 s → 35 s** on the same clip, with identical detections (177 regions); `--sample-every 4`
+  brings it to 11 s.
+- `framesSeen` comes from the decoder and `framesExamined` from the sampler. Under sampling the
+  transform's own counter reported 93 frames for a 96-frame file.
+- The analysis summary has no `frameCountPreserved`: no file was written, and claiming a preserved
+  timeline would be asserting something about bytes that do not exist.

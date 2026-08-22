@@ -14,7 +14,7 @@ namespace DeMosaicStudio.Domain.Protocol;
 public readonly record struct ProtocolVersion(int Major, int Minor) : IComparable<ProtocolVersion>
 {
     /// <summary>The version this build speaks.</summary>
-    public static ProtocolVersion Current { get; } = new(1, 0);
+    public static ProtocolVersion Current { get; } = new(1, 1);
 
     /// <summary>Parses "major.minor", rejecting anything else.</summary>
     public static ProtocolVersion Parse(string text)

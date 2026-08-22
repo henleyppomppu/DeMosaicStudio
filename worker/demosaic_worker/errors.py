@@ -103,6 +103,7 @@ W4101 = _warning("W4101", "OOM ladder step applied")
 W4102 = _warning("W4102", "Region left untouched: confidence below minRestorationConfidence")
 W4103 = _warning("W4103", "Requested temporalWindow reduced by a safety rule")
 W5101 = _warning("W5101", "Stream dropped for container compatibility")
+W5102 = _warning("W5102", "Stream copy unavailable; output was re-encoded")
 W6101 = _warning("W6101", "Backend substituted")
 
 
@@ -115,7 +116,7 @@ ALL: Final[tuple[ErrorCode, ...]] = (
     E6001, E6002, E6003, E6004, E6005,
     E7001, E7002, E7003, E7004, E7005, E7006,
     E9001,
-    W1101, W3101, W4101, W4102, W4103, W5101, W6101,
+    W1101, W3101, W4101, W4102, W4103, W5101, W5102, W6101,
 )
 
 _BY_CODE: Final[dict[str, ErrorCode]] = {c.code: c for c in ALL}

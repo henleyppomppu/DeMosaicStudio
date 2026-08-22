@@ -21,7 +21,8 @@ Usage:
 What this will do to your video, honestly: on the one clip it has been measured against, the output
 scores about 0.7 dB *below* the input inside the mosaicked region and about 4.6 dB below it
 elsewhere (docs/phase3-endtoend-report.md section 8.3). It runs; it does not yet improve anything.
-Use --dry-run to see what it would detect without writing a file.
+Use --dry-run to see what it would detect without writing a file. A job that detects nothing
+is stream-copied rather than re-encoded, so it comes back bit-identical.
 """
 
 from __future__ import annotations
@@ -70,9 +71,10 @@ def _requests(args: argparse.Namespace) -> list[dict]:
                 "v": "1.0", "type": "analyze" if args.dry_run else "process", "id": "3",
                 "jobId": "cli-1",
                 "sourcePath": str(args.source),
-                "outputPath": str(args.output) if args.output else "",
+                "outputPath": "" if args.dry_run else str(args.output or ""),
                 "settings": settings,
                 "resume": False,
+                "sampleEvery": args.sample_every,
             }
         )
 
@@ -87,7 +89,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("source", type=Path)
     parser.add_argument("output", type=Path, nargs="?")
     parser.add_argument("--probe-only", action="store_true", help="report media facts and stop")
-    parser.add_argument("--dry-run", action="store_true", help="detect and report, write nothing")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="detect and report only; writes no file and does not restore")
+    parser.add_argument("--sample-every", type=int, default=1,
+                        help="with --dry-run, examine every Nth frame (default 1)")
     parser.add_argument("--threshold", type=float, default=0.9,
                         help="mask binarization threshold; 0.9 is the calibrated point (default)")
     parser.add_argument("--confidence", type=float, default=0.45)
@@ -181,6 +186,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  regions       {s['regionsDetected']}"
                   + (f"  ({s['regionsGated']} withheld)" if s.get("regionsGated") else ""))
             print(f"  timeline      {s.get('timeline', 'n/a')}")
+            if s.get("passthrough"):
+                print("  output        stream-copied, video bitstream identical to the source")
             print(f"  confidence    {s['confidenceMean']:.3f} mean")
             if s.get("routeReasons"):
                 print("  routing:")

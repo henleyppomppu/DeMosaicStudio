@@ -253,3 +253,68 @@ def test_the_output_is_readable_by_an_independent_demuxer(tmp_path: Path) -> Non
 
     source_pts, _ = _presentation_pts(MEDIA / "cfr_30fps.mp4")
     assert int(probe.stdout.strip()) == len(source_pts)
+
+
+# ------------------------------------------------------------------------------------------
+# Stream copy (R-1.8a). See run_stream_copy's docstring for why this cannot go through PyAV.
+# ------------------------------------------------------------------------------------------
+
+
+def _video_packets(path) -> list[bytes]:
+    import av as _av
+
+    with _av.open(str(path)) as container:
+        return [
+            bytes(packet)
+            for packet in container.demux(container.streams.video[0])
+            if packet.dts is not None
+        ]
+
+
+def test_a_stream_copy_leaves_the_video_bitstream_untouched(tmp_path) -> None:
+    """T-IO-PASSTHROUGH-COPY-01, at the media layer."""
+    from demosaic_worker.media.passthrough import find_ffmpeg, run_stream_copy
+
+    if find_ffmpeg() is None:
+        import pytest as _pytest
+
+        _pytest.skip("no ffmpeg on this machine; tools/ffmpeg is gitignored")
+
+    source = MEDIA / "cfr_30fps.mp4"
+    destination = tmp_path / "copy.mp4"
+
+    result = run_stream_copy(source, destination)
+
+    assert _video_packets(destination) == _video_packets(source)
+    assert result.timeline().frame_count_preserved
+    assert result.frames_transformed == 0
+
+
+def test_pyav_still_cannot_remux_video_on_its_own(tmp_path) -> None:
+    """Pins the reason run_stream_copy shells out, so nobody "simplifies" it back.
+
+    PyAV's add_stream_from_template builds an encoder-backed video stream, and muxing demuxed
+    packets through it writes one byte per packet. If a future PyAV fixes this, the assertion
+    below fails and the shell-out can be reconsidered - which is the point of pinning it.
+    """
+    import av as _av
+
+    source = MEDIA / "cfr_30fps.mp4"
+    destination = tmp_path / "pyav_remux.mp4"
+
+    with _av.open(str(source)) as inp, _av.open(str(destination), mode="w") as out:
+        stream_in = inp.streams.video[0]
+        stream_out = out.add_stream_from_template(stream_in)
+        for packet in inp.demux(stream_in):
+            if packet.dts is None:
+                continue
+            packet.stream = stream_out
+            out.mux(packet)
+
+    original = sum(len(p) for p in _video_packets(source))
+    remuxed = sum(len(p) for p in _video_packets(destination))
+
+    assert remuxed < original / 10, (
+        f"PyAV remuxed {remuxed} bytes against {original}: if this now round-trips, "
+        "run_stream_copy no longer needs to shell out to ffmpeg"
+    )

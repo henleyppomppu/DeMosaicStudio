@@ -1,0 +1,45 @@
+{
+  "clip": "tos_002.mp4",
+  "arms": [
+    {
+      "name": "input",
+      "what": "the mosaicked video itself",
+      "outside_vs_clean": 49.553896797517616,
+      "outside_vs_input": Infinity
+    },
+    {
+      "name": "null run",
+      "what": "re-encode only, restoration disabled",
+      "outside_vs_clean": 46.61601959677957,
+      "outside_vs_input": 49.71897609486808
+    },
+    {
+      "name": "pipeline",
+      "what": "re-encode + restoration",
+      "outside_vs_clean": 44.98421271500745,
+      "outside_vs_input": 46.94437049348545
+    }
+  ],
+  "encoderCostDb": 2.938,
+  "pipelineCostDb": 1.632,
+  "bleed": {
+    "untouchedAreaMean": 0.6165,
+    "bleedAreaMean": 0.0584,
+    "bleedShareOfUntouched": 0.0947,
+    "framesMeasured": 96,
+    "bleedPsnrNullRun": 42.239,
+    "bleedPsnrPipeline": 38.033
+  },
+  "coverage": {
+    "frames": 96,
+    "framesFiring": 96,
+    "framesCopyable": 0,
+    "gops": 2,
+    "gopsFiring": 2,
+    "framesInCopyableGops": 0,
+    "keyframes": [
+      0,
+      72
+    ]
+  }
+}
