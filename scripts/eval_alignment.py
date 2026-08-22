@@ -1,12 +1,12 @@
-"""Does dense flow close the alignment gap the Phase 0 gate found? prd.md §5.7, §18 R-13.
+"""Does dense flow close the alignment gap the Phase 0 gate found? prd.md section 5.7, section 18 R-13.
 
 The gate measured, in the decision band:
 
     oracle (perfect alignment)          +3.298 dB
     estimated (global translation)      -0.861 dB
 
-and named the difference Phase 2's critical path. This script adds a third estimate — **dense
-optical flow with per-pixel confidence** — and measures where it lands between the two.
+and named the difference Phase 2's critical path. This script adds a third estimate - **dense
+optical flow with per-pixel confidence** - and measures where it lands between the two.
 
 The comparison is controlled the same way the gate's was: every arm runs the *same* solver on the
 *same* degraded, recompressed frames, and only the alignment differs. So a difference is

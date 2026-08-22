@@ -1,12 +1,12 @@
-"""Calibrates the scene-cut thresholds from the corpus. prd.md §5.12, §12.
+"""Calibrates the scene-cut thresholds from the corpus. prd.md section 5.12, section 12.
 
 The thresholds in `demosaic_worker/scene/cuts.py` started as guesses and a guess is not allowed to
-stay (§12.7). This measures the two distances on:
+stay (section 12.7). This measures the two distances on:
 
-* **within-shot pairs** — consecutive frames of one clip. These must not be cuts.
-* **across-shot pairs** — the first frame of one clip against the first frame of another. Each clip
+* **within-shot pairs** - consecutive frames of one clip. These must not be cuts.
+* **across-shot pairs** - the first frame of one clip against the first frame of another. Each clip
   comes from a different point in the film, so these are genuine cuts.
-* **flash pairs** — a real frame against itself scaled in luminance. These must not be cuts.
+* **flash pairs** - a real frame against itself scaled in luminance. These must not be cuts.
 
 and reports the separation, so the thresholds are set where the distributions actually divide.
 

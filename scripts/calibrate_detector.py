@@ -1,18 +1,18 @@
-"""Picks the detector's operating point from data. prd.md §5.2.3, §5.2.5, §12.1.
+"""Picks the detector's operating point from data. prd.md section 5.2.3, section 5.2.5, section 12.1.
 
-`docs/phase1-detector-report.md` §5 recorded that the detection threshold was fixed at 0.5 with no
-sweep, and that §5.2.3's default of 0.45 had never been calibrated against anything. The first
+`docs/phase1-detector-report.md` section 5 recorded that the detection threshold was fixed at 0.5 with no
+sweep, and that section 5.2.3's default of 0.45 had never been calibrated against anything. The first
 end-to-end run then found 843 regions in a clip containing one, so the operating point is now the
 top blocker rather than a loose end.
 
-This sweeps the threshold on **video with a known ground-truth mask** — a clean corpus clip with a
-synthetic mosaic applied to a known region — and reports, per threshold:
+This sweeps the threshold on **video with a known ground-truth mask** - a clean corpus clip with a
+synthetic mosaic applied to a known region - and reports, per threshold:
 
 * pixel precision and recall, which say whether the mask is right;
 * **regions per frame**, which says whether the *count* is right. A detector can score well on
   pixels while shattering one region into nine, and nine regions means nine restorations, nine
   dilations and nine chances to damage clean picture.
-* **false-positive area on frames with no mosaic at all**, which is what §5.2.5a actually asks about.
+* **false-positive area on frames with no mosaic at all**, which is what section 5.2.5a actually asks about.
 
 Usage::
 
@@ -182,12 +182,12 @@ def main(argv: list[str] | None = None) -> int:
     print()
     if usable:
         best = max(usable, key=lambda p: p.iou)
-        print(f"meets §5.2.5a at threshold {best.threshold} (IoU {best.iou:.3f}, "
+        print(f"meets section 5.2.5a at threshold {best.threshold} (IoU {best.iou:.3f}, "
               f"{best.regions_per_frame:.1f} regions/frame)")
     else:
         tightest = min(points, key=lambda p: p.clean_frames_firing)
         print(
-            f"NO threshold meets §5.2.5a. Best is {tightest.threshold} with "
+            f"NO threshold meets section 5.2.5a. Best is {tightest.threshold} with "
             f"{tightest.clean_frames_firing:.1%} of clean frames firing against a 0.5% bar."
         )
 

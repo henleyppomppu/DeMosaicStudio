@@ -1,8 +1,8 @@
-"""The Phase 0 feasibility gate. prd.md §1.4.3, AC-1.4.
+"""The Phase 0 feasibility gate. prd.md section 1.4.3, AC-1.4.
 
 One question: **does multi-frame restoration beat single-frame on representative material?**
 
-The whole product architecture (§19) assumes the answer is yes. This script measures it, and the
+The whole product architecture (section 19) assumes the answer is yes. This script measures it, and the
 answer is allowed to be no.
 
 Method
@@ -10,30 +10,30 @@ Method
 For each clean clip, for each block size and grid anchoring:
 
 1. Crop a fixed ROI in *frame* coordinates. A screen-anchored grid is fixed there too, so content
-   moving through the ROI is exactly the phase diversity §1.4.1 describes.
+   moving through the ROI is exactly the phase diversity section 1.4.1 describes.
 2. Apply the mosaic, with the phase either fixed to the frame (SCREEN) or riding the content
    (OBJECT).
-3. **Re-encode through H.264 at a CRF ladder.** This is mandatory (§11.3): codec quantisation
+3. **Re-encode through H.264 at a CRF ladder.** This is mandatory (section 11.3): codec quantisation
    erases the tiny inter-block variations that multi-frame solving depends on, and a gate run on
    clean synthetic mosaics would report a number the real pipeline can never reproduce.
 4. Reconstruct with the *same* solver in three arms, differing only in what the neighbours are:
 
-   * **single** — K=1. The floor for "temporal evidence adds nothing".
-   * **oracle** — K=5 neighbours synthesised from the target frame at known shifts. This is the
+   * **single** - K=1. The floor for "temporal evidence adds nothing".
+   * **oracle** - K=5 neighbours synthesised from the target frame at known shifts. This is the
      information-theoretic upper bound: perfect alignment, real content, real codec.
-   * **estimated** — K=5 *actual* neighbouring frames, aligned by the global-translation model,
-     with badly aligned neighbours excluded exactly as §5.7/§5.8 require.
+   * **estimated** - K=5 *actual* neighbouring frames, aligned by the global-translation model,
+     with badly aligned neighbours excluded exactly as section 5.7/section 5.8 require.
 
    The two multi-frame arms exist because a single one cannot distinguish "the information is not
    there" from "we could not align well enough to use it", and those two lead to opposite decisions.
    A gate that conflated them would report KILL for a solvable alignment problem.
 
-5. Score every arm against the untouched clip, plus pass-through as the do-nothing floor (§12.3).
+5. Score every arm against the untouched clip, plus pass-through as the do-nothing floor (section 12.3).
 
 Noise floor
 -----------
 Before comparing anything, the identical configuration is run twice and the spread recorded
-(§13.5). A difference smaller than that spread is not a result. Here the nondeterminism comes from
+(section 13.5). A difference smaller than that spread is not a result. Here the nondeterminism comes from
 the encoder rather than from a GPU, but the discipline is the same and the reason is identical:
 without it, the first plausible number gets believed.
 

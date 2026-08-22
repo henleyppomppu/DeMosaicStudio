@@ -1,15 +1,15 @@
-"""Cuts a source film into stratified clean clips. prd.md §11.2, §11.5, §11.6.
+"""Cuts a source film into stratified clean clips. prd.md section 11.2, section 11.5, section 11.6.
 
 The clips are the *ground truth*: the degradation generator applies a mosaic to them, and the gate
 compares a restoration against the untouched original. So two things matter here and nothing else
 does.
 
 **Stratification.** Each clip's global motion is measured, not guessed, and recorded in the
-manifest. The feasibility question (§1.4.1) is entirely about whether the subject moves across a
+manifest. The feasibility question (section 1.4.1) is entirely about whether the subject moves across a
 screen-anchored grid, so a corpus that is accidentally all-static would answer it wrongly and
 confidently.
 
-**Split hygiene** (§11.6). Clips are cut at least ``--min-gap`` apart and each is tagged with its
+**Split hygiene** (section 11.6). Clips are cut at least ``--min-gap`` apart and each is tagged with its
 source, so a later train/val/test split can keep whole regions of the film on one side. Frames from
 the same shot on both sides of a split inflate every metric.
 

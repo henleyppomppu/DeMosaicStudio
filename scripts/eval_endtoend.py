@@ -1,4 +1,4 @@
-"""End-to-end quality, as a ladder. prd.md §5.1.8, §12.
+"""End-to-end quality, as a ladder. prd.md section 5.1.8, section 12.
 
 The first end-to-end run produced output worse than its input and named three causes: an over-firing
 detector, a non-transparent encode, and multi-frame outside its operating window. This runs the
@@ -7,8 +7,8 @@ rather than a share of the blame.
 
 The score is taken twice, because a restoration job can fail in two independent ways:
 
-* **inside the mosaicked region** — did the restoration help?
-* **outside it** — did the pipeline damage picture it was supposed to leave alone? §5.1.8 exists
+* **inside the mosaicked region** - did the restoration help?
+* **outside it** - did the pipeline damage picture it was supposed to leave alone? section 5.1.8 exists
   because a full re-encode degrades 100% of the frame to fix a few percent of it.
 
 Usage::
