@@ -968,3 +968,48 @@ thing.
 
 Quality and speed together, which is rare enough to be suspicious — the reason it happens is that
 the two changes are independent: one removes work, the other removes a distraction.
+
+---
+
+## D-33 — The host is four layers, and only one of them cannot be tested
+
+**Status:** accepted (2026-08-23) · **Closes:** Phase 4's absence
+
+### Context
+
+The Domain had policies and nothing that used them. The only way to run the pipeline was
+`scripts/run_job.py`, which is a Python client for a product whose host is meant to be WPF.
+
+### Decision
+
+`Application` says what a job is and what may be done to one. `Infrastructure` knows the engine is a
+process speaking JSON Lines. `App` is a window. AGENTS.md's layer rules are what shape this, and the
+line they draw is the useful one: **`IRestorationEngine` says nothing about processes**, so the
+queue's rules are tested with neither a worker nor a GPU.
+
+Almost nothing lives in the view model. Which jobs may be cancelled, what a late progress message
+does, whether a status may move — all of that is `JobList`, and all of it has tests. What is left in
+`App` is the dispatcher marshalling and the display strings, which is the part that genuinely needs
+a window.
+
+### The first round-trip test found a defect immediately
+
+`configure_stdio_utf8` configured stdout and stderr and **never touched stdin** — the channel
+requests arrive on, carrying file paths. On a Korean-locale machine stdin is cp949, so a host that
+correctly wrote UTF-8 had its path mis-decoded and the worker died mid-handshake.
+
+`run_job.py` never showed it because every path it was ever given was ASCII. A C# test against a
+directory named in Hangul found it in one run. On this machine that is not an edge case; it is the
+normal one.
+
+### Consequences
+
+- 51 host tests: 25 on the queue's rules, 21 on the codec, 5 round-trip against the real worker.
+- The round-trip tests **skip and say why** where the interpreter or the model weights are absent —
+  both are part of the machine, not the repository. `Xunit.SkippableFact` is there because xunit 2
+  cannot skip at run time and a test that quietly passes when its environment is missing is the
+  defect this repository keeps finding.
+- `JobQueue` is `JobList`: it has no FIFO semantics and the suffix would promise them (CA1711).
+- Verified: the application starts, spawns the worker, closes cleanly, and leaves no orphan.
+- **Not verified:** nobody has processed a video through the window. The engine underneath it has
+  round-trip tests; the buttons have been clicked by no one.

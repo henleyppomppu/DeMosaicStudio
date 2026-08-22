@@ -35,7 +35,7 @@ public sealed record WorkerLocation
 /// hands it what arrived.
 /// </para>
 /// </summary>
-public sealed class WorkerProcessEngine : IRestorationEngine, IAsyncDisposable
+public sealed class WorkerProcessEngine : IRestorationEngine, IAsyncDisposable, IDisposable
 {
     private readonly WorkerLocation _location;
     private readonly string _hostVersion;
@@ -201,7 +201,11 @@ public sealed class WorkerProcessEngine : IRestorationEngine, IAsyncDisposable
         }
     }
 
-    /// <summary>Asks the worker to shut down, and waits briefly for it.</summary>
+    /// <summary>Asks the worker to shut down politely, and waits briefly for it.</summary>
+    /// <remarks>
+    /// The polite path matters: a worker killed mid-job loses the checkpoint it was about to write,
+    /// and the next attempt starts from nothing.
+    /// </remarks>
     public async ValueTask DisposeAsync()
     {
         if (_process is null)
@@ -213,8 +217,9 @@ public sealed class WorkerProcessEngine : IRestorationEngine, IAsyncDisposable
         {
             await SendAsync(WorkerCodec.Shutdown(NextId())).ConfigureAwait(false);
             _stdin?.Close();
-            await _process.WaitForExitAsync(new CancellationTokenSource(TimeSpan.FromSeconds(10)).Token)
-                .ConfigureAwait(false);
+
+            using var grace = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            await _process.WaitForExitAsync(grace.Token).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is IOException or ObjectDisposedException
                                               or OperationCanceledException or InvalidOperationException)
@@ -224,15 +229,41 @@ public sealed class WorkerProcessEngine : IRestorationEngine, IAsyncDisposable
         }
         finally
         {
+            TearDown();
+        }
+    }
+
+    /// <summary>Ends the worker without waiting.</summary>
+    /// <remarks>
+    /// Prefer <see cref="DisposeAsync"/>: this one skips the polite shutdown, so a job in progress
+    /// loses whatever it had not yet checkpointed. It exists because a type holding a process and a
+    /// semaphore has to be disposable synchronously too.
+    /// </remarks>
+    public void Dispose() => TearDown();
+
+    private void TearDown()
+    {
+        if (_process is null)
+        {
+            return;
+        }
+
+        try
+        {
             if (!_process.HasExited)
             {
                 _process.Kill(entireProcessTree: true);
             }
-
-            _process.Dispose();
-            _process = null;
-            _oneAtATime.Dispose();
         }
+        catch (Exception exception) when (exception is InvalidOperationException or NotSupportedException)
+        {
+            // Already gone.
+        }
+
+        _process.Dispose();
+        _process = null;
+        _stdin = null;
+        _oneAtATime.Dispose();
     }
 
     private async Task<WorkerMessage> ExchangeAsync(

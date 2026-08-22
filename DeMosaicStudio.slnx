@@ -3,6 +3,7 @@
     <Project Path="src/DeMosaicStudio.Domain/DeMosaicStudio.Domain.csproj" />
     <Project Path="src/DeMosaicStudio.Application/DeMosaicStudio.Application.csproj" />
     <Project Path="src/DeMosaicStudio.Infrastructure/DeMosaicStudio.Infrastructure.csproj" />
+    <Project Path="src/DeMosaicStudio.App/DeMosaicStudio.App.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/DeMosaicStudio.Domain.Tests/DeMosaicStudio.Domain.Tests.csproj" />

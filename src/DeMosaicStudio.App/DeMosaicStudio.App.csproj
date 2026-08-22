@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    prd.md §4.3: the only project that targets Windows, and the only one a Linux test may not reach.
+    Everything a test needs lives in Domain, Application or Infrastructure.
+
+    EnableWindowsTargeting lets the whole solution *compile* on Linux, which is what keeps CI able
+    to catch a broken XAML binding or a missing type. Running it is Windows-only.
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <RootNamespace>DeMosaicStudio.App</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DeMosaicStudio.Application\DeMosaicStudio.Application.csproj" />
+    <ProjectReference Include="..\DeMosaicStudio.Domain\DeMosaicStudio.Domain.csproj" />
+    <ProjectReference Include="..\DeMosaicStudio.Infrastructure\DeMosaicStudio.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>
