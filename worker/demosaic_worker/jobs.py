@@ -28,7 +28,7 @@ from .analyze.estimator import AnchorObservation, estimate_anchor, estimate_geom
 from .analyze.motion import classify
 from .analyze.profile import GridAnchor, MosaicProfile, band_for
 from .detect.regions import Region, extract_regions
-from .errors import E1001, E3002, E4002, W3101, W4102, W4103, WorkerError
+from .errors import E1001, E3001, E3002, E4002, W3101, W4102, W4103, WorkerError
 from .media.probe import probe as probe_media
 from .messages import Emitter
 from .policies import (
@@ -160,11 +160,29 @@ class JobRunner:
             return []
         return json.loads(index.read_text(encoding="utf-8")).get("models", [])
 
-    def _model_directory(self, task: str) -> Path | None:
-        for entry in self._available_models():
-            if entry.get("task") == task:
-                return self.models_root / entry["path"]
-        return None
+    def _model_directory(self, task: str, version: str | None = None) -> Path | None:
+        """Resolves a task to a model directory, honouring an explicit version.
+
+        Without ``version`` the highest available version wins. Leaving the choice to store order
+        would make the model that ran depend on how `index.json` happened to be written, which is
+        exactly the kind of thing that makes a benchmark irreproducible.
+        """
+        candidates = [e for e in self._available_models() if e.get("task") == task]
+        if not candidates:
+            return None
+
+        if version is not None:
+            for entry in candidates:
+                if entry.get("version") == version:
+                    return self.models_root / entry["path"]
+            raise WorkerError(
+                E3001,
+                f"no {task} model at version {version} in the store",
+                available=[e.get("version") for e in candidates],
+            )
+
+        best = max(candidates, key=lambda e: tuple(int(p) for p in e["version"].split(".")))
+        return self.models_root / best["path"]
 
     # --- probe (§8.3) ----------------------------------------------------------------------------
 
@@ -219,10 +237,10 @@ class JobRunner:
         if self._segmenter is None:
             from .detect.segmenter import Segmenter
 
-            directory = self._model_directory("mosaic-segmentation")
+            directory = self._model_directory(
+                "mosaic-segmentation", _setting(settings, "modelVersion")
+            )
             if directory is None:
-                from .errors import E3001
-
                 raise WorkerError(E3001, "no mosaic-segmentation model in the store")
 
             self._segmenter = Segmenter(
@@ -250,7 +268,12 @@ class JobRunner:
         window_setting = _setting(settings, "restoration", "temporalWindow", default="auto")
         window_setting = None if window_setting in (None, "auto") else int(window_setting)
         min_region_area = int(_setting(settings, "detection", "minRegionArea", default=256))
+        # Two different settings, and conflating them was a bug: §5.2.3 lists "detection confidence"
+        # (which region survives into a track) and "mask binarization threshold" (which pixel is in
+        # the mask) separately. The mask threshold was hard-coded to 0.5 and ignored the settings
+        # entirely, so the calibrated operating point could not be applied at all.
         detection_threshold = float(_setting(settings, "detection", "confidence", default=0.45))
+        mask_threshold = float(_setting(settings, "detection", "maskThreshold", default=0.5))
         min_confirm = int(_setting(settings, "detection", "minConfirmFrames", default=2))
         max_missing = int(_setting(settings, "detection", "maxMissingFrames", default=3))
         align_conf_min = float(_setting(settings, "restoration", "alignConfMin", default=0.35))
@@ -285,8 +308,18 @@ class JobRunner:
 
             context.frames_seen = index + 1
 
-            rgb = frame.to_ndarray(format="rgb24")
-            luma = rgb.astype(np.float64) @ np.array([0.299, 0.587, 0.114])
+            # **The frame is handled as YUV planes, not RGB.**
+            #
+            # Converting every restored frame out to rgb24 and back cost 45.3 dB of luma on its own,
+            # with no processing at all: the round trip destroys and re-creates 4:2:0 chroma and
+            # rounds twice through the colour matrix. Measured against 46.5 dB for the encoder alone,
+            # it was the single largest source of damage in the first end-to-end run — and it
+            # applied to the whole frame, including everything the pipeline never touched.
+            #
+            # Working on the luma plane and leaving chroma alone round-trips losslessly.
+            planes = frame.to_ndarray(format="yuv420p")
+            plane_height = frame.height
+            luma = planes[:plane_height].astype(np.float64)
 
             history.append(luma)
             if len(history) > 2 * radius + 1:
@@ -303,7 +336,7 @@ class JobRunner:
                 return None
 
             regions, clamped = extract_regions(
-                probability, threshold=0.5, min_area=min_region_area
+                probability, threshold=mask_threshold, min_area=min_region_area
             )
             if clamped:
                 emitter.warn(W3101, "region count clamped", frame=index)
@@ -323,7 +356,7 @@ class JobRunner:
             )
             same_scene = scene_end - scene_start + 1
 
-            output = rgb.astype(np.float64)
+            output = luma.copy()
             touched = False
 
             for track in tracks:
@@ -353,33 +386,22 @@ class JobRunner:
 
                 context.confidences.append(outcome.confidence)
 
-                # Everything below happens inside the ROI. Restoration ran on luma there, so the
-                # chroma follows by scaling: hue stays put while the detail changes.
+                # Everything below happens inside the ROI, on luma only. Chroma is left exactly as
+                # decoded: a mosaic destroys luma detail, and rewriting chroma to chase it would
+                # damage colour the pipeline has no evidence about.
                 roi = outcome.roi
                 left, top, right, bottom = roi.bounds
-                crop_luma = luma[top:bottom, left:right]
-
-                ratio = np.divide(
-                    outcome.restored, crop_luma,
-                    out=np.ones_like(crop_luma), where=crop_luma > 1.0,
-                )[:, :, None]
-
-                crop_rgb = output[top:bottom, left:right]
-                restored_rgb = np.clip(crop_rgb * ratio, 0, 255)
                 crop_mask = track.region.mask[top:bottom, left:right]
 
-                for channel in range(3):
-                    crop_rgb[:, :, channel] = blend_region(
-                        crop_rgb[:, :, channel],
-                        restored_rgb[:, :, channel],
-                        crop_mask,
-                        block_size=outcome.profile.block_size,
-                        feather_px=feather_px,
-                        temporal=temporal_alpha,
-                        track_id=track.track_id,
-                    )
-
-                output[top:bottom, left:right] = crop_rgb
+                output[top:bottom, left:right] = blend_region(
+                    output[top:bottom, left:right],
+                    outcome.restored,
+                    crop_mask,
+                    block_size=outcome.profile.block_size,
+                    feather_px=feather_px,
+                    temporal=temporal_alpha,
+                    track_id=track.track_id,
+                )
                 touched = True
 
             if index % 8 == 0:
@@ -401,9 +423,13 @@ class JobRunner:
 
             import av
 
-            replacement = av.VideoFrame.from_ndarray(
-                np.clip(output, 0, 255).astype(np.uint8), format="rgb24"
-            )
+            # Rebuild the plane stack with the restored luma and the *original* chroma. Rounding
+            # rather than truncating: astype() truncates, which biases every pixel down by half a
+            # level across the whole frame.
+            planes = planes.copy()
+            planes[:plane_height] = np.rint(np.clip(output, 0, 255)).astype(np.uint8)
+
+            replacement = av.VideoFrame.from_ndarray(planes, format="yuv420p")
             replacement.time_base = frame.time_base
             return replacement
 

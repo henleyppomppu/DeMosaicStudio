@@ -106,13 +106,16 @@ class Segmenter:
     usable — and testable — on a machine without it.
     """
 
-    def __init__(self, model_directory: Path, *, device: str = "auto", threshold: float = 0.5) -> None:
+    def __init__(self, model_directory: Path, *, device: str = "auto") -> None:
         import torch
 
         from .unet import MosaicUNet
 
         self.info = load_model_info(model_directory)
-        self.threshold = threshold
+
+        # No threshold here on purpose: this class returns probabilities and the caller decides where
+        # to cut. Keeping a default here once meant the calibrated operating point was silently
+        # ignored by the pipeline.
 
         resolved = (
             ("cuda" if torch.cuda.is_available() else "cpu") if device == "auto" else device

@@ -149,3 +149,97 @@ look-ahead in the media layer is the correct fix.
   A −2.4 dB result can look better or worse than its number; that has not been checked.
 - **The scoring script is not a test.** It lives in a scratch file and its region mask is derived by
   differencing, which is available here only because the degradation was synthetic.
+
+
+---
+
+## 8. The ladder — one variable per rung
+
+`scripts/eval_endtoend.py` reruns the pipeline over a fixed input changing one thing at a time, so
+each of §3's three causes gets a number instead of a share of the blame. All figures are against the
+**clean** original; the input's own scores are the bar the pipeline has to beat.
+
+### 8.1 Before the YUV fix
+
+| rung | changed | inside | vs input | outside | vs input | regions |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| (input) | the mosaicked video itself | 37.24 | — | 49.55 | — | — |
+| baseline | detector v0.1.0, mask 0.5, CRF 20 | 34.88 | −2.36 | 39.49 | −10.06 | 843 |
+| model | + detector v0.2.0 | 34.90 | −2.34 | 39.62 | −9.93 | 529 |
+| threshold | + mask 0.9 (calibrated) | 35.04 | −2.21 | 40.01 | −9.55 | 194 |
+| encode | + CRF 12 (measured transparent) | 35.09 | −2.15 | 40.44 | −9.12 | 194 |
+
+**Regions fell 4.3x and the quality barely moved** — 0.21 dB inside, 0.94 dB outside. That is the
+result that mattered: the detector work was real and it bought almost nothing, so the damage was
+mostly coming from somewhere else entirely.
+
+### 8.2 Finding it
+
+Scoring the output against the **input** rather than against the clean original, restricted to
+pixels the pipeline never restored, separates what the pipeline did from what it was given:
+
+| | PSNR vs input, on never-restored pixels |
+| --- | ---: |
+| encode only, CRF 20 | 46.46 |
+| encode only, CRF 12 | 49.72 |
+| **pipeline, CRF 20** | **41.29** |
+| **pipeline, CRF 12** | **42.64** |
+
+Five to seven dB, on pixels nothing had touched, independent of both the detector and the encoder.
+
+The cause, measured directly with no processing at all in between:
+
+| one frame round trip | luma PSNR |
+| --- | ---: |
+| via `rgb24` — what the pipeline did | **45.33 dB** |
+| via `yuv420p` planes | **inf** (lossless) |
+
+Decoding each frame to RGB and re-encoding from RGB destroys and re-creates 4:2:0 chroma and rounds
+twice through the colour matrix. It cost more than the encoder did, and it applied to **the whole
+frame**, including everything the pipeline never went near.
+
+### 8.3 After the fix
+
+The pipeline now works on the **luma plane** and leaves chroma exactly as decoded. Chroma is not
+rewritten to chase the restored luma: a mosaic destroys luma detail, and the pipeline has no
+evidence about colour that would justify altering it. `astype(uint8)` was also replaced with
+rounding — truncation biases every pixel in the frame down by half a level.
+
+| rung | changed | inside | vs input | outside | vs input | regions |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| (input) | the mosaicked video itself | 37.24 | — | 49.55 | — | — |
+| baseline | detector v0.1.0, mask 0.5, CRF 20 | 36.30 | **−0.94** | 43.51 | **−6.05** | 823 |
+| model | + detector v0.2.0 | 36.30 | −0.94 | 43.50 | −6.05 | 521 |
+| threshold | + mask 0.9 (calibrated) | 36.45 | −0.80 | 43.94 | −5.62 | 177 |
+| encode | + CRF 12 (measured transparent) | 36.55 | **−0.69** | 44.98 | **−4.57** | 177 |
+
+Inside the region: −2.15 dB → **−0.69 dB**. Outside: −9.12 dB → **−4.57 dB**.
+
+**The output is still worse than the input.** It is now worse by an amount that could plausibly be
+closed rather than by an amount that says the approach is wrong.
+
+### 8.4 What the ladder says about each cause
+
+| Cause | Contribution |
+| --- | --- |
+| **RGB round trip** | **The largest single item.** 1.5 dB inside, 4.5 dB outside, and it was not on the list of three suspects at all |
+| Encode not transparent | ~1.0 dB outside, ~0.1 inside. Real, and the cheapest thing on the list |
+| Detector over-firing | ~0.15 dB inside, ~0.45 dB outside — from a **4.6x** reduction in regions |
+| Restoration itself | Whatever remains: −0.69 dB inside with 177 regions and a transparent encode |
+
+The detector line is the surprise. It was the identified top blocker after the first run, the
+retraining was justified by measurement, the retraining worked — and it moved the output by a
+fraction of a dB. **The blocker was correctly identified as a defect and incorrectly identified as
+the cause of the damage.** Separating those two is what the ladder is for.
+
+## 9. Limitations, updated
+
+Everything in §7 still holds, and:
+
+- **Still one clip.** The ladder is four runs over one 96-frame input.
+- **The detector change is now confounded.** Switching to the luma plane changed what the detector
+  sees — the Y plane rather than a matrix-weighted RGB approximation — so the 823 vs 843 region
+  counts are not a controlled comparison across §8.1 and §8.2. Within each table the comparison is
+  controlled.
+- **Nobody has looked at any output.** −0.69 dB may look better or worse than the input; that has
+  not been checked, and PSNR on a restoration is a weak proxy for it.

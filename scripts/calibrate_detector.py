@@ -100,7 +100,7 @@ def main(argv: list[str] | None = None) -> int:
     names = [c["name"] for c in json.loads(MANIFEST.read_text(encoding="utf-8"))["clips"]]
     names = names[: args.clips]
 
-    segmenter = Segmenter(MODELS / args.model, threshold=0.5)
+    segmenter = Segmenter(MODELS / args.model)
     print(f"model {segmenter.info.model_id} {segmenter.info.version} on {segmenter.device}", flush=True)
 
     # Probability maps are computed once and thresholded many times: the sweep costs one inference

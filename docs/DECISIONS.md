@@ -361,3 +361,32 @@ alongside IoU, and the evaluation reports both for that reason.
 **Reversal cost: Low.** A metric and a script.
 
 **Date:** 2026-08-22.
+
+---
+
+## D-21 — The pipeline works on luma planes, not RGB
+
+**Decided.** Frames are handled as `yuv420p` planes. Restoration writes the luma plane; chroma is
+passed through exactly as decoded.
+
+**Rejected:** converting each frame to `rgb24`, restoring, and converting back — which is what the
+first implementation did because RGB is the convenient array shape.
+
+**Why.** Measured with no processing in between: one `yuv420p -> rgb24 -> yuv420p` round trip costs
+**45.33 dB of luma**, while the plane round trip is lossless. That is worse than the encoder
+(46.46 dB at CRF 20) and it applies to the **whole frame**, including every pixel the pipeline never
+touched — the exact thing §5.1.8 exists to prevent.
+
+On the end-to-end ladder it was worth **1.5 dB inside the region and 4.5 dB outside**, which made it
+the largest single source of damage. It was not among the three causes named after the first run.
+
+**Chroma is not rewritten to follow the restored luma.** The first implementation scaled RGB by the
+luma ratio, which is a plausible-looking way to invent colour detail the pipeline has no evidence
+for. A mosaic destroys luma detail; leaving chroma alone is the honest response.
+
+**Also fixed here:** `astype(np.uint8)` truncates. Every pixel in every restored frame was biased
+down by half a level. Now `np.rint` then cast.
+
+**Reversal cost: Low.** One function's input and output handling.
+
+**Date:** 2026-08-22.
