@@ -573,3 +573,85 @@ up three defects at once, each of which made the gate quietly do something other
 - `eval_gate.py` now carries a *shipped gate* arm alongside the idealised per-region sweep. The
   idealised sweep picked an operating point the real gate could not reach — calibrating against a
   model of the thing rather than the thing is how that gets shipped as "calibrated".
+
+---
+
+## D-26 — The forward model describes the mask, and the solver keeps its best iterate
+
+**Status:** accepted (2026-08-23) · **Supersedes the calibration of:** D-16, §5.6
+
+### Context
+
+The forward operator declared every pixel of every frame block-averaged. A mosaic covers part of a
+frame: where it does not, the frame observes the scene **directly**, at full resolution. A neighbour
+that saw content the target has lost is not weak evidence about it — it is the answer, and the model
+was discarding it.
+
+Separately, back-projection with a dense flow **diverges**. The to-target and to-neighbour fields
+are estimated independently, so the forward warp and the back warp are not exact inverses and the
+iteration is not a descent on a consistent objective. Measured with the real aligner: +0.58 dB at 5
+iterations, −0.18 at 20, −2.79 at 40. **The pipeline ran 20.** The stopping rule watched the
+*change* in the residual, which divergence never produces.
+
+### Decision
+
+- `forward_and_adjoint` applies block averaging where a frame is mosaicked and the identity where it
+  is not, with the adjoint to match. The block mean is taken over masked pixels only, so a block
+  straddling the boundary is not diluted.
+- Both solvers keep the iterate with the **lowest data residual** and stop when it stops being the
+  latest one. The residual is the only signal available at runtime; returning the last iterate
+  computed was returning whatever divergence had reached.
+
+### Consequences
+
+- The convergence fix is an unambiguous win: 40 iterations went from −2.79 dB to +0.57, and the
+  pipeline improved from −0.385 dB to **−0.311 dB** inside the region.
+- The mask model is **implemented and switched off** at `MASK_MODEL_MIN_NEIGHBOURS = 16`. Below that
+  it costs about 0.12 dB; above it, it is worth 4.4 dB against the old model. The window policy caps
+  K at 9, so it is currently never taken — deliberately, and it engages by itself when the policy is
+  re-measured.
+- **D-16 and §5.6's window table are calibrated against a model the code no longer uses.** Under the
+  old model more frames genuinely did hurt; under the corrected one the direction reverses. Nothing
+  in `WINDOW_BY_MOTION`, `PRESET_MAX_WINDOW` or the cap of 9 should be trusted until it is
+  re-measured.
+- Guards: `test_the_mask_model_turns_a_neighbour_into_a_direct_observation` and
+  `test_dense_flow_back_projection_does_not_walk_away_from_the_answer`.
+
+---
+
+## D-27 — The evaluation clip was in the regime the design calls hopeless
+
+**Status:** accepted (2026-08-23) · **Affects:** every end-to-end number in this repository
+
+### Context
+
+The ladder input applies a mosaic to a drifting ellipse. Measured properly — with the exact ellipse
+and motion taken from aligning the *clean* frames — the mask moves 3 px per frame over content that
+moves 0.1 to 0.6 px per frame. So **1.6%** of what the target lost was ever seen clean by its
+neighbour at t−1, and 3.5% by t−2.
+
+The mosaic slides over near-static content: the same picture is covered in every frame. That is the
+object-anchored regime §1.4.1 predicts to be unrecoverable and the Phase 0 gate measured at −0.79 to
+−1.50 dB.
+
+An earlier reading of 40% / 55% came from deriving the mask as `|clean − degraded| > 12`. That marks
+only pixels the block average moved far, so it is a holey mask rather than the region, and it
+overstated the diversity by more than an order of magnitude. **A threshold on a difference is not
+ground truth**, even when the degradation is synthetic and the truth is available exactly.
+
+### Decision
+
+`artifacts/screen_clean.mp4` and `artifacts/screen_input.mp4`: content panning 4 px/frame past a
+mosaic that does not move. Coverage there follows `2·d / (π·rx)` — 1.8% per neighbour, matching the
+arithmetic to a tenth of a percent.
+
+### Consequences
+
+- Every end-to-end comparison in this repository was measured in the unrecoverable regime. They are
+  still valid as measurements of *damage* — which is what they were used for — and worth nothing as
+  measurements of restoration.
+- The generator belongs in `scripts/`, alongside the ladder's, rather than in a scratch file. It is
+  not there yet.
+- The screen-anchored clip is synthetic in a second way: the pan is a crop of a real frame, so the
+  motion is a pure translation with no parallax, occlusion or object motion. It exercises the
+  mechanism; it does not represent real footage.

@@ -206,3 +206,85 @@ def test_re_averaging_an_observation_destroys_picture_the_solver_never_touches()
         "re-averaging should visibly damage the unmosaicked half; if it no longer does, this test "
         "has stopped measuring the thing it was written for"
     )
+
+
+def test_the_mask_model_turns_a_neighbour_into_a_direct_observation() -> None:
+    """The mechanism the project exists on, in the smallest form that shows it.
+
+    A screen-anchored mosaic sits still while content moves through it, so a neighbour observed -
+    at full resolution - picture the target has lost. Modelling the mask is what lets that be used;
+    declaring every pixel of every frame block-averaged throws it away.
+    """
+    rng = np.random.default_rng(19)
+    scene = rng.uniform(0, 255, size=(128, 192))
+    scene = scene + np.linspace(0, 60, 192)[None, :]      # some structure to align on
+
+    spec = MosaicProfile(block_width=8, block_height=8, anchor=GridAnchor.SCREEN)
+    mask = np.zeros(scene.shape, dtype=bool)
+    mask[32:96, 48:112] = True
+
+    shift = 24.0
+    target = np.where(mask, block_average(scene, spec, (0, 0)), scene)
+    moved = shift_bilinear(scene, shift, 0.0)
+    neighbour = np.where(mask, block_average(moved, spec, (0, 0)), moved)
+
+    observations = [Observation(target, 0.0, 0.0), Observation(neighbour, shift, 0.0)]
+    plain = reconstruct(observations, spec, (0, 0), iterations=40).image
+
+    masked = reconstruct(
+        [Observation(target, 0.0, 0.0, mask), Observation(neighbour, shift, 0.0, mask)],
+        spec, (0, 0), iterations=40,
+    ).image
+
+    inside = mask
+    before = psnr(scene[inside], target[inside])
+    without = psnr(scene[inside], plain[inside])
+    with_mask = psnr(scene[inside], masked[inside])
+
+    assert with_mask > before + 1.0, (
+        f"the mask model recovered nothing: {before:.2f} -> {with_mask:.2f} dB"
+    )
+    assert with_mask > without + 1.0, (
+        f"modelling the mask has to beat modelling everything as block-averaged: "
+        f"{without:.2f} vs {with_mask:.2f} dB"
+    )
+
+
+def test_dense_flow_back_projection_does_not_walk_away_from_the_answer() -> None:
+    """The iteration diverged, and the stopping rule watched the wrong thing.
+
+    With a dense flow the forward warp and the back warp are separately estimated fields, not exact
+    inverses, so the iteration is not a descent on a consistent objective. It improved to about
+    five iterations and then fell apart: measured +0.58 dB at 5, -0.18 at 20, -2.79 at 40, and the
+    pipeline was running 20. The old rule stopped on a *small change* in the residual, which
+    divergence never produces.
+    """
+    from demosaic_worker.restore.ibp import FlowObservation, reconstruct_flow
+
+    rng = np.random.default_rng(23)
+    scene = rng.uniform(0, 255, size=(96, 96))
+    spec = MosaicProfile(block_width=8, block_height=8, anchor=GridAnchor.SCREEN)
+    observed = block_average(scene, spec, (0, 0))
+
+    # A flow pair that is deliberately inconsistent - to_target and to_neighbour disagree, which is
+    # exactly what two separately estimated fields do.
+    to_target = np.full((*scene.shape, 2), 1.5, dtype=np.float32)
+    to_neighbour = np.full((*scene.shape, 2), -0.9, dtype=np.float32)
+    confidence = np.ones(scene.shape, dtype=np.float32)
+
+    observations = [
+        FlowObservation.target(observed),
+        FlowObservation(observed, to_neighbour, to_target, confidence),
+    ]
+
+    short = reconstruct_flow(observations, spec, (0, 0), iterations=5).image
+    long_run = reconstruct_flow(observations, spec, (0, 0), iterations=60).image
+
+    # Not exact equality: the iterate kept is the one with the lowest *data residual*, which is
+    # the only signal available at runtime, and it is not identical to the one with the best PSNR
+    # against a truth the solver cannot see. The guard is that it no longer falls apart - the
+    # symptom was -2.79 dB over 35 extra iterations, not hundredths.
+    assert psnr(scene, long_run) >= psnr(scene, short) - 0.2, (
+        f"running longer made it worse: {psnr(scene, short):.2f} dB at 5 iterations, "
+        f"{psnr(scene, long_run):.2f} at 60"
+    )
