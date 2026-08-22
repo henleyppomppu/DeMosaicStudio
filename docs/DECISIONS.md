@@ -851,3 +851,59 @@ point.
 - **v0.2.0 is no longer clearly better than v0.1.0**: +0.33 dB on the screen clip, −0.42 on the
   ladder. The retraining was justified by a false-positive measurement that is still valid; what
   changed is that false positives cost less when the thing they trigger is useful.
+
+---
+
+## D-31 — The motion bands were re-measured, and the fast band is the best one
+
+**Status:** accepted (2026-08-23) · **Supersedes:** D-16's motion table
+
+### Context
+
+`WINDOW_BY_MOTION` switched multi-frame **off** for static and fast content: static had no phase
+diversity to exploit, fast had no content correspondence left across a long baseline. Both were
+measured — with the batch solver, which reaches across the whole window.
+
+The accumulator chains one-frame baselines. Re-measured against it, on clips built at a range of
+pan rates:
+
+| pan px/frame | band | gain |
+| ---: | --- | ---: |
+| 1 | slow | +2.83 |
+| 2 | medium | +2.43 |
+| 4 | medium | +2.87 |
+| 8 | medium | +2.63 |
+| 16 | **fast** | **+5.03** |
+| 24 | **fast** | **+6.45** |
+
+The fast band is the *best* one, because fast motion is exactly what exposes the region soonest.
+The old rule was not miscalibrated; it was **inverted** for this solver.
+
+### The window is inert
+
+Measured on the same clip: `temporalWindow` of 1, 3 and 9, and the Fast and Quality presets, all
+produce **+2.83 dB**. The accumulator ignores K. Only `> SINGLE_FRAME` is load-bearing, and only
+because the router reads it.
+
+### Decision
+
+Every band permits multi-frame, and `WINDOW_BY_MOTION` is 3 throughout. The number is kept rather
+than removed so routing reasons stay comparable across versions and a future table that sets a band
+back to 1 is a deliberate act.
+
+**The medium-band alignment rule stays.** It has not been re-measured against the accumulator, and
+removing rules because a neighbouring one was disproved is how a measured policy turns back into a
+guessed one. The same applies to the object-anchored rule: the accumulator gains on the ladder clip,
+but that clip's *grid* is screen-anchored — only its mask moves — so a genuinely object-anchored
+grid remains untested.
+
+### Consequences
+
+- **Quality is unchanged**: +2.296 dB and 84% of frames, before and after. The window was already
+  inert, so this changes nothing about what the pipeline does.
+- **It changes what the pipeline says it does.** On the screen clip, `SufficientTemporalEvidence`
+  went from 145 to **191** and `MotionOutsideOperatingWindow` from 61 to **2**. The router was
+  reporting a decision it did not make — the same family of defect as `passthrough` and `analyze`.
+- `make_policy_fixture.py` now generates the whole parity fixture. The confidence gate and smoother
+  sections had been added by hand, and the first regeneration silently deleted them: **a generator
+  that writes part of a file deletes the rest.**

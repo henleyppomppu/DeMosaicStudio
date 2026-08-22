@@ -51,11 +51,14 @@ public sealed class TemporalWindowPolicyTests
     [Theory]
     [InlineData(0.05)]
     [InlineData(20.0)]
-    public void Motion_outside_the_operating_window_collapses_to_a_single_frame(double motion)
+    public void Motion_alone_no_longer_collapses_the_window(double motion)
     {
+        // D-31, superseding D-16: static and fast used to collapse to a single frame, measured with
+        // the batch solver. The accumulator chains one-frame baselines, and the fast band turns out
+        // to be its best one - +6.45 dB at 24 px/frame against +2.83 at 1.
         var decision = TemporalWindowPolicy.Decide(Unconstrained(motion: motion));
 
-        Assert.Equal(TemporalWindowPolicy.SingleFrame, decision.EffectiveWindow);
+        Assert.True(decision.EffectiveWindow > TemporalWindowPolicy.SingleFrame);
     }
 
     /// <summary>The band boundaries themselves. prd.md §5.6.</summary>

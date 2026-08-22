@@ -122,26 +122,33 @@ public static class TemporalWindowPolicy
     };
 
     /// <summary>
-    /// Window by motion band. **Measured**, not assumed — D-16, <c>docs/phase2-alignment-report.md</c>.
+    /// Window by motion band. **Re-measured against the accumulator** — D-31, superseding D-16.
     /// <para>
-    /// Static and fast are 1 because measurement put both below single-frame even with perfect
-    /// alignment: static has no phase diversity to exploit, fast has no content correspondence left
-    /// to align. The earlier table asked for K of 7-9 at low motion; that was written before any
-    /// experiment and is wrong in both directions.
+    /// The size is inert: the accumulator ignores K entirely, and windows of 1, 3 and 9 produce the
+    /// same output. Only <c>&gt; SingleFrame</c> is load-bearing; the number is kept so routing
+    /// reasons stay comparable across versions.
+    /// </para>
+    /// <para>
+    /// D-16 switched static and fast <b>off</b>, measured with the batch solver. Against the
+    /// accumulator the fast band is the <i>best</i> one, because fast motion is what exposes the
+    /// region soonest: +2.83 dB at 1 px/frame, +2.87 at 4, <b>+5.03 at 16</b> and <b>+6.45 at 24</b>.
     /// </para>
     /// </summary>
     public static int WindowForBand(MotionBand band) => band switch
     {
-        MotionBand.Static => SingleFrame,
+        MotionBand.Static => 3,
         MotionBand.Slow => 3,
         MotionBand.Medium => 3,
-        MotionBand.Fast => SingleFrame,
+        MotionBand.Fast => 3,
         _ => throw new ArgumentOutOfRangeException(nameof(band), band, "Unknown motion band."),
     };
 
-    /// <summary>Bands in which the multi-frame path is permitted at all (§5.8, D-16).</summary>
-    public static bool AllowsMultiFrame(MotionBand band) =>
-        band is MotionBand.Slow or MotionBand.Medium;
+    /// <summary>
+    /// Bands in which the multi-frame path is permitted at all (§5.8). All of them, now that the
+    /// solver chains one-frame baselines rather than reaching across a window: the rule that
+    /// excluded static and fast described the batch solver's failure modes, not this one's (D-31).
+    /// </summary>
+    public static bool AllowsMultiFrame(MotionBand band) => true;
 
     /// <summary>
     /// Reconciles §5.6's motion table with §15's per-preset windows: the preset sets the ceiling and

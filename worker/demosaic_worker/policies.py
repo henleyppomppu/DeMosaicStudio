@@ -73,20 +73,36 @@ PRESET_MAX_WINDOW = {
     QualityPreset.QUALITY: 9,
 }
 
-#: Window by motion band. **Measured**, not assumed — D-16, docs/phase2-alignment-report.md §3.
+#: Window by motion band. **Re-measured against the accumulator** — D-31, superseding D-16.
 #:
-#: static and fast are 1 (multi-frame off) because measurement put them below single-frame even with
-#: perfect alignment: static has no phase diversity to exploit, fast has no content correspondence
-#: left to align.
+#: The size is inert: the accumulator ignores K entirely, and window 1, 3 and 9 produce byte-for-byte
+#: the same output (+2.83 dB on the same clip). Only ``> SINGLE_FRAME`` is load-bearing, and it is
+#: kept as a number so the routing reasons stay comparable across versions.
+#:
+#: D-16 switched static and fast **off**, measured with the batch solver. Against the accumulator the
+#: fast band is the *best* one, because fast motion is what exposes the region soonest:
+#:
+#: =====  ========  ======
+#: pan    band      gain
+#: =====  ========  ======
+#: 1      slow      +2.83
+#: 2      medium    +2.43
+#: 4      medium    +2.87
+#: 8      medium    +2.63
+#: 16     **fast**  **+5.03**
+#: 24     **fast**  **+6.45**
+#: =====  ========  ======
 WINDOW_BY_MOTION = {
-    MotionBand.STATIC: 1,
+    MotionBand.STATIC: 3,
     MotionBand.SLOW: 3,
     MotionBand.MEDIUM: 3,
-    MotionBand.FAST: 1,
+    MotionBand.FAST: 3,
 }
 
-#: Bands where multi-frame is permitted at all. Everything else routes to single-frame (§5.8).
-MULTI_FRAME_BANDS = frozenset({MotionBand.SLOW, MotionBand.MEDIUM})
+#: Bands where multi-frame is permitted at all. All of them, now that the solver chains one-frame
+#: baselines rather than reaching across a window: the rule that excluded static and fast described
+#: the batch solver's failure modes and not this one's (D-31).
+MULTI_FRAME_BANDS = frozenset(MotionBand)
 
 #: Medium motion only qualifies when alignment is good; slow qualifies regardless.
 MEDIUM_BAND_ALIGNMENT_MIN = 0.60

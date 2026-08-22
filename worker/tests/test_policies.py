@@ -95,39 +95,70 @@ def test_the_fixture_covers_every_routing_reason() -> None:
 # --- the measured table (D-16) ---------------------------------------------------------------------
 
 
-def test_the_window_table_matches_what_was_measured() -> None:
-    """docs/phase2-alignment-report.md §3. Changing these means re-measuring, not re-guessing."""
-    assert WINDOW_BY_MOTION[MotionBand.STATIC] == 1
-    assert WINDOW_BY_MOTION[MotionBand.SLOW] == 3
-    assert WINDOW_BY_MOTION[MotionBand.MEDIUM] == 3
-    assert WINDOW_BY_MOTION[MotionBand.FAST] == 1
+def test_every_band_permits_multi_frame() -> None:
+    """D-31, superseding D-16.
+
+    The old table switched static and fast **off**, measured with the batch solver: static had no
+    phase diversity to exploit and fast had no content correspondence left across a long baseline.
+    The accumulator chains one-frame baselines, and against it the fast band is the *best* one -
+    fast motion is what exposes the region soonest. Measured: +2.83 dB at 1 px/frame, +2.87 at 4,
+    +5.03 at 16, +6.45 at 24.
+    """
+    assert MULTI_FRAME_BANDS == frozenset(MotionBand)
+    assert all(WINDOW_BY_MOTION[band] > 1 for band in MotionBand)
 
 
-def test_only_slow_and_medium_permit_multi_frame() -> None:
-    assert MULTI_FRAME_BANDS == frozenset({MotionBand.SLOW, MotionBand.MEDIUM})
+def test_the_window_size_is_inert_and_only_its_being_above_one_matters() -> None:
+    """The accumulator ignores K: windows of 1, 3 and 9 produce the same output (+2.83 dB each).
+
+    The number is kept so routing reasons stay comparable across versions, and this pins the only
+    property that is still load-bearing - so that a future table which sets a band back to 1 is a
+    deliberate act rather than a typo.
+    """
+    for band in MotionBand:
+        assert WINDOW_BY_MOTION[band] > 1, band
 
 
 @pytest.mark.parametrize("motion", [0.05, 20.0])
-def test_motion_outside_the_operating_window_routes_to_single_frame(motion: float) -> None:
-    decision = route(RouteInputs(motion_pixels_per_frame=motion))
+def test_motion_alone_no_longer_forces_single_frame(motion: float) -> None:
+    """Static and fast used to route straight to single-frame. Neither does now (D-31)."""
+    decision = route(RouteInputs(motion_pixels_per_frame=motion, valid_aligned_neighbours=2))
 
-    assert decision.path is RestorationPath.SINGLE_FRAME
-    assert decision.reason is RouteReason.MOTION_OUTSIDE_OPERATING_WINDOW
+    assert decision.reason is not RouteReason.MOTION_OUTSIDE_OPERATING_WINDOW
 
 
-def test_a_fixed_window_does_not_override_the_motion_gate() -> None:
-    """The override replaces the motion *choice*, never the motion *gate* (§5.6.1)."""
+def test_medium_motion_still_needs_alignment() -> None:
+    """The one motion rule that has *not* been re-measured against the accumulator, so it stays.
+
+    Removing rules because a neighbouring one was disproved is how a measured policy turns back
+    into a guessed one.
+    """
+    poor = route(RouteInputs(motion_pixels_per_frame=3.0, mean_alignment_confidence=0.1,
+                             valid_aligned_neighbours=2))
+    good = route(RouteInputs(motion_pixels_per_frame=3.0, mean_alignment_confidence=0.9,
+                             valid_aligned_neighbours=2))
+
+    assert poor.path is RestorationPath.SINGLE_FRAME
+    assert poor.reason is RouteReason.MOTION_OUTSIDE_OPERATING_WINDOW
+    assert good.path is RestorationPath.MULTI_FRAME
+
+
+def test_a_fixed_window_still_yields_to_every_safety_rule() -> None:
+    """The override replaces the motion *choice*, never a safety reduction (§5.6.1).
+
+    The motion band no longer reduces anything, so the rule is pinned against the one that does.
+    """
     decision = decide_window(
         setting=9,
         preset=QualityPreset.QUALITY,
         motion_pixels_per_frame=20.0,
-        anchor=GridAnchor.SCREEN,
+        anchor=GridAnchor.OBJECT,
         same_scene_frames=9,
         stream_frames=9,
     )
 
     assert decision.effective == 1
-    assert decision.reason is WindowReductionReason.MOTION_BAND
+    assert decision.reason is WindowReductionReason.OBJECT_ANCHORED_GRID
     assert decision.was_reduced
 
 

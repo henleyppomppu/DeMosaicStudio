@@ -103,17 +103,18 @@ public sealed class RestorationRouterTests
             RouteReason.SingleValidFrame);
 
     /// <summary>
-    /// The v3.3 motion gate. Measured below single-frame at both ends of the motion range, so this
-    /// is a safety condition rather than an optimisation (D-16).
+    /// The motion gate used to send both ends of the range to single-frame. Re-measured against the
+    /// accumulator, neither end is harmful and the fast end is the best of all (D-31).
     /// </summary>
     [Theory]
-    [InlineData(0.05)]   // static: no phase diversity to exploit
-    [InlineData(20.0)]   // fast: no content correspondence left
-    public void Motion_outside_the_operating_window_routes_to_single_frame(double motion) =>
-        AssertRoute(
-            Healthy() with { MedianFlowPixelsPerFrame = motion },
-            RestorationPath.SingleFrame,
-            RouteReason.MotionOutsideOperatingWindow);
+    [InlineData(0.05)]   // static
+    [InlineData(20.0)]   // fast
+    public void Motion_alone_no_longer_forces_single_frame(double motion)
+    {
+        var decision = RestorationRouter.Route(Healthy() with { MedianFlowPixelsPerFrame = motion });
+
+        Assert.NotEqual(RouteReason.MotionOutsideOperatingWindow, decision.Reason);
+    }
 
     /// <summary>Medium motion needs good alignment before it qualifies; slow motion does not.</summary>
     [Fact]
