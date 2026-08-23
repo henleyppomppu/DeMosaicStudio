@@ -85,6 +85,50 @@ public sealed class ProgressRateTests
         Assert.Equal(0.45, job.Fps);
     }
 
+    [Fact]
+    public void A_run_of_reports_in_the_same_stage_all_land()
+    {
+        // **The test that was missing.** The worker was emitting progress correctly and the codec
+        // was parsing it correctly, and each side had its own passing test. Nothing exercised the
+        // sequence across the seam — and the seam refused every report after the first, because
+        // `IsAllowed` compared ranks strictly and a job already Processing cannot "move to"
+        // Processing. The window showed 복원 중 / 0.0% / 시작하는 중 for the life of the job.
+        var jobs = WithRunningJob();
+        jobs.Report("j", JobStatus.Probing, "시작하는 중");
+
+        Assert.True(jobs.Report(new EngineProgress
+        {
+            JobId = "j", Stage = "probing", Fraction = 0.0,
+        }));
+        Assert.True(jobs.Report(Report(0.0, null, null)));            // the forced restoring 0.0
+        Assert.True(jobs.Report(Report(0.0001, 0.44, 240_000)));      // the first real frame
+        Assert.True(jobs.Report(Report(0.0002, 0.45, 239_000)));      // and the next
+
+        var job = jobs.Find("j")!;
+        Assert.Equal(JobStatus.Processing, job.Status);
+        Assert.Equal(0.0002, job.Fraction);
+        Assert.Equal(0.45, job.Fps);
+        Assert.Equal(239_000, job.EtaSeconds);
+    }
+
+    [Theory]
+    [InlineData(JobStatus.Probing)]
+    [InlineData(JobStatus.Analyzing)]
+    [InlineData(JobStatus.Processing)]
+    public void Staying_in_an_active_stage_is_allowed(JobStatus stage) =>
+        Assert.True(JobStatusTransition.IsAllowed(stage, stage));
+
+    [Fact]
+    public void Staying_still_does_not_make_a_terminal_state_leavable()
+    {
+        // The rule that had to survive the fix: a terminal state is terminal, including against
+        // itself. A second `result` for a finished job must not re-open it.
+        Assert.False(JobStatusTransition.IsAllowed(JobStatus.Completed, JobStatus.Completed));
+        Assert.False(JobStatusTransition.IsAllowed(JobStatus.Cancelled, JobStatus.Cancelled));
+        Assert.False(JobStatusTransition.IsAllowed(JobStatus.Failed, JobStatus.Failed));
+        Assert.False(JobStatusTransition.IsAllowed(JobStatus.Pending, JobStatus.Pending));
+    }
+
     [Theory]
     // The measurement that prompted this: 0.45 fps at 1080p, against sources of each length.
     [InlineData(10, 30, 0.015)]

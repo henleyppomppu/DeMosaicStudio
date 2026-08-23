@@ -19,8 +19,10 @@ public static class JobStatusTransition
     /// Three rules, and nothing else:
     /// <list type="number">
     /// <item>A terminal state is terminal. Nothing leaves it — not even another terminal state.</item>
-    /// <item>Active stages move forward only. Probing may reach Processing; Processing may not go
-    /// back to Probing, which is what a late message looks like.</item>
+    /// <item>Active stages never move backwards. Probing may reach Processing; Processing may not
+    /// return to Probing, which is what a late message looks like. <b>Staying put is allowed</b> —
+    /// a running job reports the same stage for its whole life, and refusing those reports throws
+    /// away every fraction and rate after the first.</item>
     /// <item>Cancelled and Failed are reachable from anywhere that is not already terminal,
     /// including Pending — a job can be cancelled before it starts.</item>
     /// </list>
@@ -53,7 +55,16 @@ public static class JobStatusTransition
             return false;
         }
 
-        return Rank(to) > Rank(from);
+        // **Greater than or equal, not greater than.** Staying in a stage is not leaving it
+        // backwards, and progress reports overwhelmingly do stay: a job emits one `restoring`
+        // message a second for hours.
+        //
+        // With a strict comparison the first `restoring` report moved the job Probing -> Processing
+        // and every later one was refused, so the fraction froze at whatever arrived with the
+        // first — 0.0 — and the rate never reached the window at all. The queue showed
+        // "복원 중 · 0.0% · 시작하는 중" for as long as the job ran, which is indistinguishable
+        // from a hang and was reported as one.
+        return Rank(to) >= Rank(from);
     }
 
     /// <summary>Applies a status if the rule allows it, and returns the job either way.</summary>

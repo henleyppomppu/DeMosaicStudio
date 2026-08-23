@@ -1469,6 +1469,32 @@ D-30 priced the quality side of that same lever: mask 0.9 costs about 0.7 dB ins
 (+3.21 → +2.51 on the screen clip). So the trade is roughly **2× throughput for 0.7 dB**, and it is
 a trade, not a free win.
 
+### The host was throwing every report away
+
+The above was written after fixing the worker, and the window still did not move. The reason was on
+the other side of the seam:
+
+```csharp
+return Rank(to) > Rank(from);   // JobStatusTransition.IsAllowed
+```
+
+**Strictly greater.** `JobList.Report(EngineProgress)` maps `restoring` to `Processing` and consults
+that rule. The first such report moved the job Probing → Processing and was applied. **Every report
+after it was refused**, because a job already in Processing cannot "move to" Processing — so the
+fraction froze at the 0.0 that arrived with the first, and the rate never reached the window at all.
+
+The queue read `복원 중 · 0.0% · 시작하는 중` for as long as the job ran, which is exactly what a
+hang looks like.
+
+Staying in a stage is not leaving it backwards. The comparison is now `>=`, and the terminal rule is
+untouched — `IsAllowed(Completed, Completed)` is still false, so a second `result` cannot re-open a
+finished job.
+
+**What let this through:** the worker had a test that it emits progress, and the codec had a test
+that it parses progress. Neither ran a *sequence* through the queue. `A_run_of_reports_in_the_same_stage_all_land`
+does, and it fails without the fix. This is the fourth defect in this repository living exactly on a
+seam that both sides tested from their own end.
+
 ### Consequences
 
 - **§6.1's ≥4 fps target is missed by an order of magnitude at 1080p.** The 4.33 fps in D-28 and
