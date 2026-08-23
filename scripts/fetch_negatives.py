@@ -11,8 +11,10 @@ detector that has never seen any of them has no reason not to fire on all of the
 fires on 82% of clean cartoon frames against a requirement of 0.5%.
 
 **Politeness is not optional here.** Wikimedia rate-limits, and this asks for hundreds of files: the
-User-Agent identifies the tool, requests are spaced, and a 429 backs off rather than retrying
-immediately. Being throttled is the API telling you to slow down, not an error to route around.
+User-Agent identifies the tool, requests are spaced, and a 429 waits **for as long as the server
+asks**. Its 429 carries ``Retry-After: 600``; an exponential guess topping out near three minutes
+lands back inside the same penalty every time, which is how a run can retry itself to death and
+collect thirteen files.
 
 Everything downloaded is CC-licensed or public domain, and every file's licence and author are
 recorded next to it. Under D-11 nothing is redistributed, but the record is what makes prd.md
@@ -36,6 +38,13 @@ import urllib.parse
 import urllib.request
 from dataclasses import asdict, dataclass
 from pathlib import Path
+
+# Anything printed here can carry a Commons filename, and Commons filenames are in every language
+# there is. The console on this machine is cp949, so one accented character in a *value* kills the
+# run - and the ASCII rule that guards printed *literals* cannot see it, because the literal is
+# fine and the interpolated value is not. Replacing is the right trade for a progress line.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 REPO = Path(__file__).resolve().parent.parent
 NEGATIVES = REPO / "training" / "datasets" / "negatives"
@@ -63,11 +72,21 @@ CLASSES: dict[str, list[str]] = {
     "mesh": ["Tulle"],
     # Block-constant on a grid by intent rather than by damage. The hardest class of the four,
     # because it is what a mosaic looks like when nothing is wrong.
-    "pixel-art": ["Pixel art"],
+    #
+    # **Under-collected, and it cannot be fixed by synthesis.** Commons has almost no pixel art -
+    # most of it is copyrighted - and `Category:Pixel art` is empty. Manufacturing it is worse than
+    # having none: a photo downscaled with nearest-neighbour and scaled back up *is* a mosaic, so
+    # labelling one as a negative teaches the detector the exact opposite of the thing. Real pixel
+    # art differs by having a limited palette, deliberate outlines and high contrast between
+    # adjacent blocks, and none of that survives a naive synthesis.
+    "pixel-art": ["Video game screenshots"],
 }
 
 #: Below this on the shorter side an image is too small to crop a detector patch out of.
 MIN_SIDE = 400
+
+#: Above this an original is not worth the bandwidth for a negative patch source.
+MAX_BYTES = 25 * 1024 * 1024
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,6 +106,22 @@ class Negative:
     size_bytes: int
 
 
+def _retry_after(error: urllib.error.HTTPError, fallback: float) -> float:
+    """How long the server said to wait.
+
+    Wikimedia answers a 429 with ``Retry-After: 600``. Guessing instead - doubling from a couple of
+    seconds - never waits long enough, so every attempt lands inside the same penalty and the run
+    dies having learnt nothing. The header is the answer; read it.
+    """
+    header = error.headers.get("Retry-After") if error.headers else None
+    if header:
+        try:
+            return max(float(header), fallback)
+        except ValueError:
+            pass
+    return fallback
+
+
 def _request(params: dict[str, str | int], delay: float) -> dict:
     """One API call, with the back-off a shared service is owed."""
     url = f"{API}?format=json&{urllib.parse.urlencode(params)}"
@@ -99,8 +134,8 @@ def _request(params: dict[str, str | int], delay: float) -> dict:
         except urllib.error.HTTPError as error:
             if error.code != 429:
                 raise
-            wait = delay * (2 ** attempt)
-            print(f"    throttled; waiting {wait:.0f}s", flush=True)
+            wait = _retry_after(error, delay * (2 ** attempt))
+            print(f"    throttled; the server asked for {wait:.0f}s", flush=True)
             time.sleep(wait)
 
     raise RuntimeError("still throttled after five attempts; try again later")
@@ -128,8 +163,10 @@ def files_in(category: str, limit: int, delay: float) -> list[dict]:
         "gcmtype": "file",
         "gcmlimit": limit,
         "prop": "imageinfo",
+        # **No iiurlwidth.** Asking for a scaled rendering makes Commons generate it on request,
+        # and that path is rate-limited far harder than serving an original from cache: at a 6 s
+        # delay it still refused after a 192 s back-off. Originals come straight out.
         "iiprop": "url|size|extmetadata",
-        "iiurlwidth": 1600,
     }, delay)
     time.sleep(delay)
 
@@ -145,7 +182,8 @@ def files_in(category: str, limit: int, delay: float) -> list[dict]:
             "title": page.get("title", ""),
             "width": info.get("width", 0),
             "height": info.get("height", 0),
-            "url": info.get("thumburl") or info.get("url"),
+            "url": info.get("url"),
+            "bytes": info.get("size", 0),
             "descriptionurl": info.get("descriptionurl", ""),
             "licence": _strip_html(meta.get("LicenseShortName", {}).get("value", "unknown")),
             "author": _strip_html(meta.get("Artist", {}).get("value", "unknown"))[:120],
@@ -173,8 +211,8 @@ def fetch(url: str, destination: Path, delay: float) -> bytes:
         except urllib.error.HTTPError as error:
             if error.code != 429:
                 raise
-            wait = delay * (2 ** attempt)
-            print(f"    throttled; waiting {wait:.0f}s", flush=True)
+            wait = _retry_after(error, delay * (2 ** attempt))
+            print(f"    throttled; the server asked for {wait:.0f}s", flush=True)
             time.sleep(wait)
 
     raise RuntimeError("still throttled after six attempts; try again later")
@@ -196,6 +234,32 @@ def main(argv: list[str] | None = None) -> int:
     NEGATIVES.mkdir(parents=True, exist_ok=True)
     collected: list[Negative] = []
 
+    existing: list[dict] = []
+    if MANIFEST.exists():
+        existing = json.loads(MANIFEST.read_text(encoding="utf-8")).get("files", [])
+    kept_from_before = [row for row in existing if row.get("negative_class") not in set(args.classes)]
+
+    def record() -> None:
+        """Writes the manifest after **every** file.
+
+        The first version wrote it once, at the end. Wikimedia throttled the run to death partway
+        through and 38 downloaded files were left with no recorded licence or author - which under
+        this repository's own rule makes them unusable, so they had to be deleted. A collection that
+        only records provenance if it finishes is a collection that loses it.
+        """
+        MANIFEST.write_text(
+            json.dumps({
+                "version": 1,
+                "note": ("Hard negatives for the detector (prd.md section 11.4). Every file is "
+                         "CC-licensed or public domain and its licence and author are recorded. "
+                         "Under D-11 nothing is redistributed; this record answers prd.md "
+                         "section 2.4 later."),
+                "source": "Wikimedia Commons",
+                "files": kept_from_before + [asdict(n) for n in collected],
+            }, indent=2),
+            encoding="utf-8",
+        )
+
     for negative_class in args.classes:
         categories = CLASSES[negative_class]
         print(f"\n{negative_class}: {', '.join(categories)}", flush=True)
@@ -215,6 +279,8 @@ def main(argv: list[str] | None = None) -> int:
                 if kept >= args.per_class:
                     break
                 if min(entry["width"], entry["height"]) < args.min_side:
+                    continue
+                if entry.get("bytes", 0) > MAX_BYTES:
                     continue
                 # PDFs and video land in these categories too; the detector reads still frames.
                 if not entry["url"].lower().split("?")[0].endswith((".jpg", ".jpeg", ".png")):
@@ -242,28 +308,13 @@ def main(argv: list[str] | None = None) -> int:
                     size_bytes=len(payload),
                 ))
                 kept += 1
+                record()
                 print(f"  [{kept:3}] {name}  {entry['licence']}", flush=True)
 
         if kept == 0:
             print(f"  nothing usable in {', '.join(categories)}", flush=True)
 
-    existing = []
-    if MANIFEST.exists():
-        existing = json.loads(MANIFEST.read_text(encoding="utf-8")).get("files", [])
-    keep = [row for row in existing
-            if row.get("negative_class") not in set(args.classes)]
-
-    MANIFEST.write_text(
-        json.dumps({
-            "version": 1,
-            "note": ("Hard negatives for the detector (prd.md section 11.4). Every file is CC-licensed "
-                     "or public domain and its licence and author are recorded. Under D-11 nothing "
-                     "is redistributed; this record answers prd.md section 2.4 later."),
-            "source": "Wikimedia Commons",
-            "files": keep + [asdict(n) for n in collected],
-        }, indent=2),
-        encoding="utf-8",
-    )
+    record()
 
     by_class: dict[str, int] = {}
     for negative in collected:

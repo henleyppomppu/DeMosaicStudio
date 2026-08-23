@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "note": "Hard negatives for the detector (prd.md section 11.4). Every file is CC-licensed or public domain and its licence and author are recorded. Under D-11 nothing is redistributed; this record answers prd.md section 2.4 later.",
+  "source": "Wikimedia Commons",
+  "files": [
+    {
+      "name": "led_000.jpg",
+      "negative_class": "led",
+      "category": "LED displays",
+      "title": "File:'Tatab\u00e1nya, S\u00e1rberki lak\u00f3telep' Haltestelle, 2021 S\u00e1rberek.jpg",
+      "licence": "CC BY-SA 3.0",
+      "author": "Globetrotter19",
+      "source_url": "https://commons.wikimedia.org/wiki/File:%27Tatab%C3%A1nya,_S%C3%A1rberki_lak%C3%B3telep%27_Haltestelle,_2021_S%C3%A1rberek.jpg",
+      "width": 1217,
+      "height": 1623,
+      "sha256": "f3081fae090deb04332f672223dbe67ba2056a5f3ed044505b3d0df67e22c547",
+      "size_bytes": 563962
+    },
+    {
+      "name": "led_001.jpg",
+      "negative_class": "led",
+      "category": "LED displays",
+      "title": "File:2018Shilin Cixian Temple\u6148\u8af4\u5bae\u5927\u6bbf\u6771\u5074.jpg",
+      "licence": "CC BY-SA 4.0",
+      "author": "Taiwankengo",
+      "source_url": "https://commons.wikimedia.org/wiki/File:2018Shilin_Cixian_Temple%E6%85%88%E8%AB%B4%E5%AE%AE%E5%A4%A7%E6%AE%BF%E6%9D%B1%E5%81%B4.jpg",
+      "width": 4896,
+      "height": 3264,
+      "sha256": "a182f946389e7c7ade20c141616eb92221c3c8e2aa66e4ca1c4b35c8a3eecb37",
+      "size_bytes": 6930354
+    }
+  ]
+}
