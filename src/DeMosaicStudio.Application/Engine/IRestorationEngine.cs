@@ -73,6 +73,12 @@ public sealed record EngineProgress
 
     /// <summary>Frames per second, when the engine is in a position to say.</summary>
     public double? Fps { get; init; }
+
+    /// <summary>
+    /// Seconds of work left, or null when the engine cannot say — which includes the case where
+    /// the source did not report a duration, so <see cref="Fraction"/> is meaningless too.
+    /// </summary>
+    public double? EtaSeconds { get; init; }
 }
 
 /// <summary>How a job ended.</summary>

@@ -387,3 +387,86 @@ def test_a_job_with_nothing_to_restore_still_reports_progress(
 
     assert moving, "no progress between the forced endpoints on a job that restored nothing"
     assert [r["fraction"] for r in moving] == sorted(r["fraction"] for r in moving)
+
+
+def test_progress_carries_a_rate_and_an_estimate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`eta` has been in the protocol from the start and nothing ever filled it in.
+
+    A percentage alone cannot answer the question a user asks ten minutes into a job. At the
+    measured throughput - 0.45 frames a second at 1080p - an hour-long source is under half a
+    percent for its first ten minutes, rounds to zero, and looks exactly like a hang.
+    """
+    from demosaic_worker import messages as messages_module
+
+    monkeypatch.setattr(messages_module, "MAX_PROGRESS_PER_SECOND", 10_000)
+
+    buffer = io.StringIO()
+    context = JobContext(
+        job_id="eta-1",
+        source_path=str(SOURCE),
+        output_path=str(tmp_path / "out.mp4"),
+        settings=_settings(),
+    )
+    _runner(NeverFires()).run(context, Emitter(stream=buffer))
+
+    moving = [
+        report
+        for line in buffer.getvalue().splitlines()
+        if line.strip() and (report := json.loads(line))["type"] == "progress"
+        and report["stage"] == "restoring" and 0.0 < report["fraction"] < 1.0
+    ]
+
+    assert moving, "no progress to inspect"
+    assert all(report["fps"] and report["fps"] > 0 for report in moving)
+    assert all(report["eta"] is not None and report["eta"] >= 0 for report in moving), (
+        "the fixture reports a duration, so every estimate should be a number"
+    )
+    # It shrinks: an estimate that does not is not an estimate.
+    assert moving[-1]["eta"] < moving[0]["eta"]
+
+
+def test_an_unknown_source_length_gives_a_rate_but_no_estimate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The host tells "starting up" from "cannot know" by seeing a rate with no estimate.
+
+    Without that distinction the window shows a zero that will never move and says nothing about
+    why - which is the same failure as the hang this pair of fields exists to rule out.
+    """
+    from demosaic_worker import jobs as jobs_module
+    from demosaic_worker import messages as messages_module
+
+    monkeypatch.setattr(messages_module, "MAX_PROGRESS_PER_SECOND", 10_000)
+
+    real_probe = jobs_module.probe_media
+
+    def without_duration(path: Any) -> Any:
+        from dataclasses import replace
+
+        return replace(real_probe(path), duration_seconds=0.0)
+
+    monkeypatch.setattr(jobs_module, "probe_media", without_duration)
+
+    buffer = io.StringIO()
+    context = JobContext(
+        job_id="eta-2",
+        source_path=str(SOURCE),
+        output_path=str(tmp_path / "out.mp4"),
+        settings=_settings(),
+    )
+    _runner(NeverFires()).run(context, Emitter(stream=buffer))
+
+    restoring = [
+        report
+        for line in buffer.getvalue().splitlines()
+        if line.strip() and (report := json.loads(line))["type"] == "progress"
+        and report["stage"] == "restoring" and report["fps"]
+    ]
+
+    assert restoring, "no rate reported"
+    assert all(report["eta"] is None for report in restoring)
+    assert all(report["fraction"] == 0.0 for report in restoring), (
+        "with no duration there is nothing to divide by, which is exactly why eta is null"
+    )

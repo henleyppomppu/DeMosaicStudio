@@ -1414,3 +1414,65 @@ Driven through UI automation against the real executable: menus, buttons, column
 -state hint and the §1.3 disclaimer in the main window; the title, three tab headers, buttons and
 labels in the settings dialog. Numbers render `0.45`, `0.50` — Korean uses the same decimal point,
 so the values are unchanged.
+
+---
+
+## D-42 — A percentage alone cannot answer "is it stuck?"
+
+**Status:** accepted (2026-08-23) · **Prompted by:** a job reported as hung that was not
+
+### What happened
+
+A user watched a job sit at **0%** while the CPU and GPU were plainly busy, and reported it as hung.
+It was not. Measured on the live process: 35.7 minutes elapsed, **8.9 of 32 cores** occupied
+continuously by the worker, GPU at 25%. It was working the whole time.
+
+The arithmetic explains the rest. Measured throughput is **0.44 frames a second at 1080p**, so ten
+minutes is about 270 frames:
+
+| source | frames | after ten minutes | shown as `P0` |
+| --- | ---: | ---: | ---: |
+| 10 min @ 30 fps | 18,000 | 1.50% | 2% |
+| 30 min @ 30 fps | 54,000 | 0.50% | **0%** |
+| 60 min @ 30 fps | 108,000 | 0.25% | **0%** |
+
+**For any source over about twenty minutes, 0% is the correct display and it is also useless.**
+
+### Decision
+
+The window shows the rate and the estimate, not only a percentage.
+
+- `eta` has been in the protocol since 1.0 and **nothing had ever filled it in**. The worker now
+  does, from the frame rate it already computes.
+- `EngineProgress.Fps` was parsed by the codec and then **thrown away by the queue**. It now
+  reaches the job.
+- The percentage uses one decimal below 10%, so 0.25% reads as `0.3%` rather than `0%`.
+- A rate with **no** estimate is how the host learns the container never reported a duration —
+  which is also the case where `fraction` is pinned at zero forever. The detail line says so
+  instead of showing a zero that will never move.
+
+### The deeper finding: false positives are the throughput problem
+
+One alignment per **track** per frame (D-28), so every spurious region costs a dense optical flow
+and a solve. The detector fires on 54–84% of *clean* frames (D-36), and that is not only a quality
+defect — it is where the time goes. Measured today on one 1080p clip:
+
+| mask threshold | min region area | fps | speed-up |
+| ---: | ---: | ---: | ---: |
+| 0.5 (shipped) | 1024 | 0.44 | — |
+| 0.5 | 4096 | 0.54 | 1.2× |
+| 0.9 | 1024 | 0.74 | 1.7× |
+| 0.9 | 4096 | 0.91 | 2.1× |
+| 0.99 | 1024 | **1.03** | **2.3×** |
+
+D-30 priced the quality side of that same lever: mask 0.9 costs about 0.7 dB inside the region
+(+3.21 → +2.51 on the screen clip). So the trade is roughly **2× throughput for 0.7 dB**, and it is
+a trade, not a free win.
+
+### Consequences
+
+- **§6.1's ≥4 fps target is missed by an order of magnitude at 1080p.** The 4.33 fps in D-28 and
+  the 6.42 fps quoted for the accumulator were measured on far smaller frames.
+- A one-hour source is a **67-hour job** at the shipped settings. Nothing in the product says so
+  before the user starts it. Estimating up front from a probe is the obvious follow-on and is not
+  done.

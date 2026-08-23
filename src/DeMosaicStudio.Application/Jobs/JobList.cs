@@ -102,6 +102,10 @@ public sealed class JobList
         {
             Status = status ?? job.Status,
             Fraction = progress.Fraction ?? job.Fraction,
+            // Not carried forward when absent: a rate that stops being reported is stale, and a
+            // stale "0.45 fps" beside a frozen percentage is the reassurance this exists to avoid.
+            Fps = progress.Fps,
+            EtaSeconds = progress.EtaSeconds,
         };
         Raise();
         return true;

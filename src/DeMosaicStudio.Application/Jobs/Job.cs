@@ -59,6 +59,22 @@ public sealed record Job
     /// <summary>Fraction complete in <c>[0, 1]</c>, or null before anything is known.</summary>
     public double? Fraction { get; init; }
 
+    /// <summary>Frames a second, as last reported.</summary>
+    /// <remarks>
+    /// Kept because a percentage on its own cannot answer "is this stuck?". At this pipeline's
+    /// throughput an hour-long source sits under 0.5% for its first ten minutes, which rounds to
+    /// zero and looks identical to a hang.
+    /// </remarks>
+    public double? Fps { get; init; }
+
+    /// <summary>Seconds of work left, or null when the engine cannot say.</summary>
+    /// <remarks>
+    /// Null with a known <see cref="Fps"/> means the source never reported a duration — in which
+    /// case <see cref="Fraction"/> is meaningless too, and the display says so instead of showing
+    /// a zero that will never move.
+    /// </remarks>
+    public double? EtaSeconds { get; init; }
+
     /// <summary>A short line for the user, in their language. Never a stack trace.</summary>
     public string? Message { get; init; }
 

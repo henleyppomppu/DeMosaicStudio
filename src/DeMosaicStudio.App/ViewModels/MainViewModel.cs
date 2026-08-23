@@ -450,10 +450,46 @@ public sealed class JobRow : INotifyPropertyChanged
             JobStatus.Cancelled => "취소됨",
             _ => "실패",
         };
-        Progress = job.Fraction is { } fraction ? $"{fraction:P0}" : string.Empty;
-        Detail = job.Message ?? string.Empty;
+        // One decimal below 10%. The whole-percent format was hiding the difference between a job
+        // that has not started and one that is 0.25% through a sixty-seven-hour run.
+        Progress = job.Fraction is { } fraction
+            ? (fraction < 0.10 ? $"{fraction:P1}" : $"{fraction:P0}")
+            : string.Empty;
+        Detail = Describe(job);
         CanRetry = job.IsTerminal;
     }
+
+    /// <summary>
+    /// The detail line: what happened for a finished job, how fast it is going for a running one.
+    /// </summary>
+    /// <remarks>
+    /// A running job shows its rate and its estimate rather than only a percentage, because a
+    /// percentage cannot answer the question a user asks ten minutes in. At the measured throughput
+    /// — 0.45 frames a second at 1080p — an hour-long source is under half a percent for its first
+    /// ten minutes, which rounds to zero and is indistinguishable from a hang.
+    /// </remarks>
+    private static string Describe(Job job)
+    {
+        if (!job.IsActive || job.Fps is not { } fps)
+        {
+            return job.Message ?? string.Empty;
+        }
+
+        // A rate with no estimate means the container never said how long the source is — in which
+        // case the percentage beside it is a zero that will never move, and saying so is the point.
+        return job.EtaSeconds is { } eta
+            ? $"{fps:0.##} fps · 남은 시간 {Humanise(TimeSpan.FromSeconds(eta))}"
+            : $"{fps:0.##} fps · 원본 길이를 알 수 없어 진행률을 계산할 수 없습니다";
+    }
+
+    /// <summary>A duration in the units a person would use for it.</summary>
+    private static string Humanise(TimeSpan span) => span switch
+    {
+        { TotalDays: >= 1 } => $"약 {span.TotalDays:0.#}일",
+        { TotalHours: >= 1 } => $"약 {span.TotalHours:0.#}시간",
+        { TotalMinutes: >= 1 } => $"약 {span.TotalMinutes:0}분",
+        _ => "1분 미만",
+    };
 
     private void Set<T>(ref T field, T value, [CallerMemberName] string? name = null)
     {

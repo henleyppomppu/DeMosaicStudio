@@ -379,12 +379,26 @@ class JobRunner:
             # here at 1080p on the CPU: 0%, then 6.7% ten seconds later, then 13.3% twenty after
             # that. That reads as a hung window, which is what it was mistaken for.
             elapsed = max(time.time() - started, 1e-6)
+            rate = (index + 1) / elapsed
+
+            # `eta` has been in the protocol from the start and nothing has ever filled it in. A
+            # percentage alone cannot answer the question a user actually asks ten minutes in -
+            # "is this stuck?" - because at this pipeline's throughput an hour of video sits below
+            # 0.5% for the first ten minutes and rounds to zero. Measured: 0.45 frames a second at
+            # 1080p, so a one-hour source is a sixty-seven-hour job.
+            #
+            # Null when the container did not say how long the source is: that is also the case
+            # where `fraction` is stuck at zero, and the host tells the two apart by seeing a rate
+            # with no estimate.
+            remaining = (total - index) / rate if total and rate > 0 else None
+
             emitter.progress(
                 context.job_id,
                 Stage.ANALYZING if context.analyze_only else Stage.RESTORING,
                 min((index / total) if total else 0.0, 0.99),
                 pts=int(frame.pts) if frame.pts is not None else None,
-                fps=round((index + 1) / elapsed, 2),
+                fps=round(rate, 2),
+                eta_seconds=round(remaining, 1) if remaining is not None else None,
             )
 
             # **The frame is handled as YUV planes, not RGB.**

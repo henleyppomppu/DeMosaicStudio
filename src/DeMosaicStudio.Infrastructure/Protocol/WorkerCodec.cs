@@ -153,6 +153,7 @@ public static class WorkerCodec
         Stage = message["stage"]?.GetValue<string>() ?? string.Empty,
         Fraction = Double(message, "fraction"),
         Fps = Double(message, "fps"),
+        EtaSeconds = Double(message, "eta"),
     };
 
     /// <summary>Reads a terminal <c>result</c>.</summary>
