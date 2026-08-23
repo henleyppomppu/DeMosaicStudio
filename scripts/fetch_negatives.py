@@ -69,7 +69,12 @@ CLASSES: dict[str, list[str]] = {
     # inverted.
     "led": ["LED displays", "Video walls"],
     # A regular lattice laid over a scene.
-    "mesh": ["Tulle"],
+    #
+    # **Not `Tulle`.** That was the first choice and it is Commons' category for the *French commune
+    # of Tulle*, not the fabric - the collected files were municipal photography and the measurement
+    # taken from them was of French town squares. Checking what a category actually contains is not
+    # optional, and a name that reads right in English is not a check.
+    "mesh": ["Wire netting", "Mosquito nets"],
     # Block-constant on a grid by intent rather than by damage. The hardest class of the four,
     # because it is what a mosaic looks like when nothing is wrong.
     #
@@ -263,6 +268,13 @@ def main(argv: list[str] | None = None) -> int:
     for negative_class in args.classes:
         categories = CLASSES[negative_class]
         print(f"\n{negative_class}: {', '.join(categories)}", flush=True)
+
+        # Re-collecting a class drops its manifest entries, so its files on disk have to go
+        # with them. Leaving them behind produces exactly what this tool exists to avoid:
+        # image files whose licence and author nothing records.
+        for stale in NEGATIVES.glob(f"{negative_class}_*"):
+            stale.unlink()
+
         kept = 0
 
         for category in categories:

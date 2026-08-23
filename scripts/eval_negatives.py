@@ -41,8 +41,14 @@ CORPUS = REPO / "training" / "datasets" / "clean"
 FRAME_HEIGHT = 800
 
 
-def _as_frame(path: Path) -> np.ndarray | None:
-    """Loads an image as a luma frame of roughly video height."""
+def _as_frame(path: Path, match_video: bool = False) -> np.ndarray | None:
+    """Loads an image as a luma frame of roughly video height.
+
+    ``match_video`` puts it through the same H.264 encode the clean corpus went through. Without
+    it the comparison is confounded: the collected negatives are high-quality photographs and the
+    control is video, so a lower firing rate could be about compression rather than content - and
+    a detector trained on video frames has every reason to behave differently on a clean JPEG.
+    """
     try:
         with Image.open(path) as image:
             grey = image.convert("L")
@@ -51,9 +57,44 @@ def _as_frame(path: Path) -> np.ndarray | None:
                 grey = grey.resize(
                     (max(int(grey.width * scale), 16), FRAME_HEIGHT), Image.LANCZOS
                 )
-            return np.asarray(grey, dtype=np.float64)
+            frame = np.asarray(grey, dtype=np.float64)
     except (OSError, ValueError):
         return None
+
+    return _through_h264(frame) if match_video else frame
+
+
+def _through_h264(frame: np.ndarray, crf: int = 12) -> np.ndarray:
+    """Encodes one frame as H.264 and decodes it back, at the corpus's own quality."""
+    import io
+
+    import av
+
+    height, width = frame.shape
+    # x264 wants even dimensions.
+    frame = frame[: height - height % 2, : width - width % 2]
+    height, width = frame.shape
+
+    buffer = io.BytesIO()
+    with av.open(buffer, mode="w", format="mp4") as container:
+        stream = container.add_stream("libx264", rate=24)
+        stream.width, stream.height, stream.pix_fmt = width, height, "yuv420p"
+        stream.options = {"crf": str(crf), "preset": "medium"}
+
+        picture = av.VideoFrame.from_ndarray(
+            np.repeat(frame[:, :, None], 3, axis=2).astype(np.uint8), format="rgb24"
+        )
+        for packet in stream.encode(picture):
+            container.mux(packet)
+        for packet in stream.encode():
+            container.mux(packet)
+
+    buffer.seek(0)
+    with av.open(buffer) as container:
+        for decoded in container.decode(container.streams.video[0]):
+            return decoded.to_ndarray(format="gray").astype(np.float64)
+
+    return frame
 
 
 def _clean_frames(limit: int) -> list[np.ndarray]:
@@ -77,6 +118,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--thresholds", type=float, nargs="+",
                         default=[0.5, 0.9, 0.99, 0.999])
     parser.add_argument("--min-area", type=int, default=1024)
+    parser.add_argument("--match-video-compression", action="store_true",
+                        help="put the collected images through the same H.264 encode the corpus "
+                             "went through, so the comparison is not about image quality")
     parser.add_argument("--out", type=Path, default=REPO / "docs" / "negatives-report.json")
     args = parser.parse_args(argv)
 
@@ -88,7 +132,7 @@ def main(argv: list[str] | None = None) -> int:
     by_class: dict[str, list[np.ndarray]] = defaultdict(list)
 
     for record in records:
-        frame = _as_frame(NEGATIVES / record["name"])
+        frame = _as_frame(NEGATIVES / record["name"], args.match_video_compression)
         if frame is not None:
             by_class[record["negative_class"]].append(frame)
 
@@ -120,13 +164,20 @@ def main(argv: list[str] | None = None) -> int:
     args.out.write_text(json.dumps({
         "model": args.model,
         "minArea": args.min_area,
+        "matchedVideoCompression": args.match_video_compression,
         "requirement": {"source": "prd.md section 5.2.5a", "maxFiringFraction": 0.005},
         "firing": report,
     }, indent=2), encoding="utf-8")
 
     print()
     print("section 5.2.5a asks for <= 0.5% of frames with no mosaic to produce any region.")
-    print(f"wrote {args.out.relative_to(REPO)}")
+    # An --out anywhere outside the repository is legitimate; naming it relative to the
+    # repository is a nicety, not a requirement.
+    try:
+        shown = args.out.relative_to(REPO)
+    except ValueError:
+        shown = args.out
+    print(f"wrote {shown}")
 
     return 0
 
