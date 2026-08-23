@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -98,6 +99,10 @@ class Emitter:
     """
 
     stream: IO[str] = field(default_factory=lambda: sys.stdout)
+    #: stdout has two writers now - the dispatch thread emitting progress and results, and
+    #: the reader thread acknowledging a cancel. One JSON Lines message is one line, and two
+    #: unlocked writes can interleave into a line that parses as neither.
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
     _last_progress_at: float = 0.0
     _last_fraction: float = -1.0
     _last_stage_index: int = -1
@@ -113,8 +118,10 @@ class Emitter:
         }
         envelope.update(payload)
 
-        self.stream.write(json.dumps(envelope, ensure_ascii=False) + "\n")
-        self.stream.flush()
+        line = json.dumps(envelope, ensure_ascii=False) + "\n"
+        with self._lock:
+            self.stream.write(line)
+            self.stream.flush()
 
     def ready(self, worker_version: str, capabilities: dict[str, Any]) -> None:
         """Handshake reply."""

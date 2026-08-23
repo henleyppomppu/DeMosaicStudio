@@ -3,6 +3,7 @@ using System.Windows;
 using DeMosaicStudio.App.ViewModels;
 using DeMosaicStudio.App.Views;
 using DeMosaicStudio.Infrastructure.Engine;
+using DeMosaicStudio.Infrastructure.Settings;
 
 namespace DeMosaicStudio.App;
 
@@ -18,7 +19,7 @@ public partial class App : System.Windows.Application, IDisposable
 
         _engine = new WorkerProcessEngine(Locate());
 
-        var viewModel = new MainViewModel(_engine, Dispatcher);
+        var viewModel = new MainViewModel(_engine, Dispatcher, JsonSettingsStore.Default());
         var window = new MainWindow { DataContext = viewModel };
 
         MainWindow = window;

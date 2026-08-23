@@ -360,6 +360,33 @@ class JobRunner:
 
             context.frames_seen = index + 1
 
+            # **Progress is reported here, before anything can return early.**
+            #
+            # It used to be emitted only on the path that actually restored a frame, which meant a
+            # video with nothing to restore - or a stretch of one between regions - reported 0% for
+            # its whole run while the decoder worked through it. Every early return below (cancelled,
+            # detector failure, no restorable track, analysis) skipped it, and those are the common
+            # cases, not the rare ones.
+            #
+            # The stage is fixed by the mode rather than by what this frame turned out to contain:
+            # section 8.4 forbids a stage moving backwards, and choosing it per-frame would do
+            # exactly that on the first frame with no region in it.
+            #
+            # Offered every frame, not every eighth. The emitter's own rate limit (section 8.4, four a
+            # second) is what stops a fast job flooding the channel, and it does that job whatever
+            # it is offered - whereas a fixed stride is a *floor* on the interval, so on hardware
+            # that manages a frame a second it turned into one update every eight seconds. Measured
+            # here at 1080p on the CPU: 0%, then 6.7% ten seconds later, then 13.3% twenty after
+            # that. That reads as a hung window, which is what it was mistaken for.
+            elapsed = max(time.time() - started, 1e-6)
+            emitter.progress(
+                context.job_id,
+                Stage.ANALYZING if context.analyze_only else Stage.RESTORING,
+                min((index / total) if total else 0.0, 0.99),
+                pts=int(frame.pts) if frame.pts is not None else None,
+                fps=round((index + 1) / elapsed, 2),
+            )
+
             # **The frame is handled as YUV planes, not RGB.**
             #
             # Converting every restored frame out to rgb24 and back cost 45.3 dB of luma on its own,
@@ -418,16 +445,6 @@ class JobRunner:
             if context.analyze_only:
                 context.frames_with_regions += 1
                 context.note_route("AnalyzedOnly")
-                if index % 8 == 0:
-                    fraction = (index / total) if total else 0.0
-                    elapsed = max(time.time() - started, 1e-6)
-                    emitter.progress(
-                        context.job_id,
-                        Stage.ANALYZING,
-                        min(fraction, 0.99),
-                        pts=int(frame.pts) if frame.pts is not None else None,
-                        fps=round((index + 1) / elapsed, 2),
-                    )
                 return None
 
             changes = detect_cuts(history) if len(history) > 1 else []
@@ -507,17 +524,6 @@ class JobRunner:
                         "evidenceDepth": outcome.usable_neighbours,
                         "reason": outcome.decision.reason.value,
                     }) + "\n")
-
-            if index % 8 == 0:
-                fraction = (index / total) if total else 0.0
-                elapsed = max(time.time() - started, 1e-6)
-                emitter.progress(
-                    context.job_id,
-                    Stage.RESTORING,
-                    min(fraction, 0.99),
-                    pts=int(frame.pts) if frame.pts is not None else None,
-                    fps=round((index + 1) / elapsed, 2),
-                )
 
             if not touched:
                 context.frames_passed_through += 1

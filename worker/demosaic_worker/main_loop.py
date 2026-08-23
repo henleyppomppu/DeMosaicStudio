@@ -9,6 +9,10 @@ easy to get subtly wrong:
   would disagree.
 * **Cancel is cooperative** (§8.5.3). The host asks; the worker drains, checkpoints, and emits a
   terminal ``result`` with ``status="cancelled"``. Nothing is killed mid-write.
+* **stdin is read on its own thread** (§8.5.3). It has to be: a job runs on the dispatch thread and
+  takes minutes, so a loop that read the next line only between jobs could not see a ``cancel``
+  until the work it was meant to interrupt had already finished. That was true here for the whole
+  life of the file - the point above described a guarantee nothing implemented.
 * **Every failure carries a numbered code** (§10.1). An unexpected exception becomes E9001 rather
   than a traceback on stdout — a traceback on stdout would corrupt the protocol stream on top of
   whatever went wrong.
@@ -18,7 +22,9 @@ easy to get subtly wrong:
 
 from __future__ import annotations
 
+import queue
 import sys
+import threading
 import traceback
 from dataclasses import dataclass, field
 from typing import IO, Any
@@ -40,6 +46,10 @@ class Worker:
     current: JobContext | None = None
     _running: bool = True
     _capabilities: dict[str, Any] = field(default_factory=dict)
+    #: Jobs cancelled before the dispatch thread had them running. The reader answers a `cancel`
+    #: the moment it arrives, which can be the moment *before* `_start` assigns `current` - and a
+    #: cancel that lands in that window used to vanish, leaving the job to run to completion.
+    _cancelled_ids: set[str] = field(default_factory=set)
 
     def capabilities(self) -> dict[str, Any]:
         """What this build can do, reported at handshake.
@@ -79,23 +89,44 @@ class Worker:
                 )
                 self.emitter.send(WorkerMessage.PREVIEW_RESULT, request.job_id, **result)
 
-            case HostMessage.PAUSE:
-                if self.current:
-                    self.current.paused = True
-
-            case HostMessage.RESUME:
-                if self.current:
-                    self.current.paused = False
-
-            case HostMessage.CANCEL:
-                if self.current:
-                    self.current.cancelled = True
-                    self.emitter.log("info", "cancel acknowledged", job=self.current.job_id)
+            case HostMessage.CANCEL | HostMessage.PAUSE | HostMessage.RESUME:
+                self.interrupt(request)
 
             case HostMessage.SHUTDOWN:
-                if self.current:
-                    self.current.cancelled = True
+                self.interrupt(request)
                 self._running = False
+
+    #: Messages that must be honoured *during* a job rather than queued behind it. They only set a
+    #: flag the running job polls, so they are safe to apply from the reader thread.
+    INTERRUPTS = frozenset({
+        HostMessage.CANCEL,
+        HostMessage.PAUSE,
+        HostMessage.RESUME,
+        HostMessage.SHUTDOWN,
+    })
+
+    def interrupt(self, request: Request) -> None:
+        """Applies a control message to the running job, if there is one.
+
+        Called from the reader thread while the dispatch thread is inside the job. Nothing here may
+        block or touch anything the job owns - a flag and a log line is the whole budget.
+        """
+        job = self.current
+        if job is None or job.finished:
+            # Not running yet, or already over. Remember the request so `_start` can honour it;
+            # a job id is the only thing that makes that safe to replay.
+            if request.type is not HostMessage.PAUSE and request.job_id:
+                self._cancelled_ids.add(request.job_id)
+            return
+
+        match request.type:
+            case HostMessage.PAUSE:
+                job.paused = True
+            case HostMessage.RESUME:
+                job.paused = False
+            case _:
+                job.cancelled = True
+                self.emitter.log("info", "cancel acknowledged", job=job.job_id)
 
     def _start(self, request: Request, *, analyze_only: bool) -> None:
         # jobId lives in the envelope, not the payload: parse_request lifts it out. Reaching for it
@@ -118,6 +149,9 @@ class Worker:
             sample_every=max(1, int(request.get("sampleEvery") or 1)),
         )
         self.current = context
+        if job_id in self._cancelled_ids:
+            self._cancelled_ids.discard(job_id)
+            context.cancelled = True
 
         try:
             summary = self.runner.run(context, self.emitter)
@@ -130,20 +164,22 @@ class Worker:
             context.finished = True
 
     def run(self, stream: IO[str] | None = None) -> int:
-        """Reads and dispatches until stdin closes or ``shutdown`` arrives."""
+        """Reads and dispatches until stdin closes or ``shutdown`` arrives.
+
+        Reading and dispatching are separate threads. The reader answers interrupts itself and
+        hands everything else to this one, which runs jobs to completion one at a time - so the
+        ordering guarantee the protocol makes about *work* is unchanged, and a ``cancel`` no longer
+        waits behind the job it is cancelling.
+        """
         source = stream if stream is not None else sys.stdin
+        inbox: queue.Queue[Request | None] = queue.Queue()
 
-        for line in source:
-            line = line.strip()
-            if not line:
-                continue
+        reader = threading.Thread(
+            target=self._read, args=(source, inbox), name="demosaic-stdin", daemon=True
+        )
+        reader.start()
 
-            try:
-                request = parse_request(line)
-            except WorkerError as error:
-                self.emitter.error(None, error)
-                continue
-
+        while (request := inbox.get()) is not None:
             try:
                 self.handle(request)
             except WorkerError as error:
@@ -158,6 +194,31 @@ class Worker:
                 break
 
         return 0
+
+    def _read(self, source: IO[str], inbox: "queue.Queue[Request | None]") -> None:
+        """Parses stdin, applying interrupts here and queueing everything else."""
+        try:
+            for line in source:
+                line = line.strip()
+                if not line:
+                    continue
+
+                try:
+                    request = parse_request(line)
+                except WorkerError as error:
+                    self.emitter.error(None, error)
+                    continue
+
+                if request.type in self.INTERRUPTS:
+                    self.interrupt(request)
+                    # `shutdown` is *also* queued: stopping the loop is ordered work, and doing it
+                    # from here would drop requests already waiting in the inbox.
+                    if request.type is not HostMessage.SHUTDOWN:
+                        continue
+
+                inbox.put(request)
+        finally:
+            inbox.put(None)
 
 
 def main(argv: list[str] | None = None) -> int:

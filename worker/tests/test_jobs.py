@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 from pathlib import Path
 from typing import Any
 
@@ -345,3 +346,44 @@ def test_a_fully_gated_job_is_a_pass_through(tmp_path: Path) -> None:
     assert summary["framesRestored"] == 0
     assert summary["passthrough"] is True
     assert _video_stream_digest(destination) == _video_stream_digest(SOURCE)
+
+
+# --------------------------------------------------------------------------------------------
+# Progress belongs to the decode, not to the restoration
+# --------------------------------------------------------------------------------------------
+
+
+def test_a_job_with_nothing_to_restore_still_reports_progress(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The defect: progress was emitted only on the path that restored a frame.
+
+    Every early return - no region, detector failure, cancelled, analysis - skipped it, and those
+    are the ordinary cases. A video the detector never fires on reported 0% from start to finish
+    while the decoder worked through the whole file, which is what the window showed.
+
+    The rate limiter is lifted because it is not what is under test: at four messages a second a
+    short fixture can legitimately emit only the two forced ones, and the defect would survive.
+    """
+    from demosaic_worker import messages as messages_module
+
+    monkeypatch.setattr(messages_module, "MAX_PROGRESS_PER_SECOND", 10_000)
+
+    buffer = io.StringIO()
+    context = JobContext(
+        job_id="progress-1",
+        source_path=str(SOURCE),
+        output_path=str(tmp_path / "out.mp4"),
+        settings=_settings(),
+    )
+    _runner(NeverFires()).run(context, Emitter(stream=buffer))
+
+    reports = [
+        json.loads(line)
+        for line in buffer.getvalue().splitlines()
+        if line.strip() and json.loads(line)["type"] == "progress"
+    ]
+    moving = [r for r in reports if r["stage"] == "restoring" and 0.0 < r["fraction"] < 1.0]
+
+    assert moving, "no progress between the forced endpoints on a job that restored nothing"
+    assert [r["fraction"] for r in moving] == sorted(r["fraction"] for r in moving)

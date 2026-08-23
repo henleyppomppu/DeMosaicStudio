@@ -1154,3 +1154,136 @@ is what `scripts/fetch_negatives.py` and the collected negatives are for.
 - The restorer is content-dependent too: **+7.05 dB** on the screen-anchored clip, **+0.39** on
   Sintel, **−0.07** on Big Buck Bunny. Every headline this project has quoted came from the first.
   Future figures belong per content class or as a range, never as one number.
+
+---
+
+## D-37 — The worker reads stdin on its own thread, because Stop could not otherwise work
+
+**Status:** accepted (2026-08-23) · **Fixes:** the claim §8.5.3 and `main_loop.py` both made
+
+### Context
+
+`Worker.run` was `for line in sys.stdin:` on one thread, and `handle()` for a `process` message ran
+the entire job inline. Between those two facts, **the loop is not reading stdin for the whole
+duration of a job**. A `cancel` sits in the pipe until the work it was meant to interrupt has
+finished; `context.cancelled` is then set on a job that has already ended.
+
+Every downstream cancellation check — the one at the top of `transform`, the `status = "cancelled"
+if context.cancelled` in `_start` — was therefore unreachable in practice. The module docstring said
+"the host asks; the worker drains, checkpoints, and emits a terminal `result`", and nothing
+implemented it. The Stop button did nothing, and that is what the user reported.
+
+### Decision
+
+Reading and dispatching are separate threads. The reader parses stdin and answers the four
+**interrupts** — `cancel`, `pause`, `resume`, `shutdown` — itself, because they only set a flag the
+running job polls. Everything else goes on a queue the dispatch thread drains one at a time, so the
+protocol's guarantee about *work* ordering (§8.5.2, one job at a time) is untouched.
+
+Three details are load-bearing:
+
+- **`shutdown` is both.** It is applied as an interrupt *and* queued, because stopping the loop is
+  ordered work: handling it only on the reader would drop requests already waiting in the inbox.
+- **A cancel that beats the job to the starting line is remembered.** The reader can answer a
+  `cancel` in the window between the host sending `process` and `_start` assigning `current` — so a
+  cancel with no job to attach to is recorded by id and applied when that id starts.
+- **stdout now has two writers**, so `Emitter.send` takes a lock. One JSON Lines message is one
+  line, and two unlocked writes can interleave into a line that parses as neither.
+
+### Alternatives rejected
+
+- **Polling stdin between frames.** Non-blocking stdin on Windows means `msvcrt` or an overlapped
+  handle, and the job loop would have to call it — spreading protocol concerns into the pipeline.
+- **Killing the process on cancel.** That is what the cooperative design exists to avoid: a worker
+  killed mid-write loses the checkpoint it was about to write, so the next attempt starts at zero.
+
+### Measured
+
+Real worker, real 1080p clip, cancel sent 45 s into the job: acknowledged in **under 0.1 s**,
+terminal `result` with `status="cancelled"` **0.8 s** later, after the encoder closed its file.
+
+### Guards
+
+`worker/tests/test_main_loop.py`. The stdin fixture releases the cancel only once the job has
+started — a `StringIO` holding both lines up front cannot tell the two designs apart, because by
+the time the job ended the flag would be set either way.
+
+---
+
+## D-38 — Progress is reported from the decode, and offered every frame
+
+**Status:** accepted (2026-08-23) · **Fixes:** two defects with the same symptom
+
+### Context
+
+Progress was emitted at one point in the frame transform: after a frame had been restored. Four
+early returns sat above it — cancelled, detector failure, **no restorable region**, analysis — and
+the third is the ordinary case, not the rare one. A video with no mosaic in it, or a stretch of one
+between regions, reported 0% for its whole run while the decoder worked through it.
+
+The emit was also gated on `index % 8 == 0`.
+
+### Decision
+
+The report is offered at the top of the transform, before anything can return, and on **every**
+frame.
+
+The stage is chosen by the job's mode rather than by what the frame turned out to contain: §8.4
+forbids a stage moving backwards, and picking it per-frame would do exactly that on the first frame
+with no region in it.
+
+Dropping the stride is the part worth explaining. `Emitter.progress` already rate-limits to four a
+second, and that limit does its job whatever it is offered. A fixed stride is not a second limiter —
+it is a **floor on the interval**, and the two compose badly: on hardware managing about a frame a
+second, every eighth frame is one update every eight seconds.
+
+### Measured
+
+Same clip, same machine, 1080p detection on the CPU. First figures are the stride, second are
+without it:
+
+| | updates in 43 s | worst gap |
+| --- | ---: | ---: |
+| every 8th frame | 4 | 20 s |
+| every frame | 22 | 2.7 s |
+
+Neither run approached the four-a-second ceiling, which is the point: the limiter was never what
+was throttling this.
+
+### Guards
+
+`test_a_job_with_nothing_to_restore_still_reports_progress`, which lifts the rate limit — at four a
+second a short fixture can legitimately emit only the two forced endpoints, and the defect would
+survive the test.
+
+---
+
+## D-39 — The window's rows are updated in place, not rebuilt
+
+**Status:** accepted (2026-08-23) · **Follows from:** D-38
+
+### Context
+
+`JobList.Changed` hands out the whole list, and the view model rebuilt `Rows` from it: `Clear()`,
+then add. That is a fine shape for a list that changes when the user does something. It stopped
+being fine the moment progress started arriving several times a second (D-38), because rebuilding
+drops the `ListView`'s selection — so a user selecting a job in order to Remove or Retry it would
+have the selection taken out from under their hand before they could press the button.
+
+This is a defect D-38 *created*. Before it, progress moved rarely enough that nobody noticed.
+
+### Decision
+
+Rows are matched by id and mutated. `JobRow` became a mutable class implementing
+`INotifyPropertyChanged` rather than a record, which is the cost: an immutable row cannot be updated
+in place, and replacing it is what breaks selection.
+
+The reconciliation removes rows whose jobs are gone, updates the ones that remain, inserts new ones
+at the job's index, and moves a row whose position changed — a retry appends, so positions do move.
+
+### Alternatives rejected
+
+- **Rebinding selection by id after each rebuild.** Restores the selection but not the focus, the
+  scroll position or an in-progress rubber-band drag.
+- **Rate-limiting the host's redraw instead.** Treats the symptom, and the correct interval is a
+  guess that would be wrong on some machine.
