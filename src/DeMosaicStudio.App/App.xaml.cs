@@ -1,5 +1,7 @@
+using System.ComponentModel;
 using System.IO;
 using System.Windows;
+using System.Windows.Threading;
 using DeMosaicStudio.App.ViewModels;
 using DeMosaicStudio.App.Views;
 using DeMosaicStudio.Infrastructure.Engine;
@@ -17,6 +19,10 @@ public partial class App : System.Windows.Application, IDisposable
     {
         base.OnStartup(e);
 
+        // Before anything can throw. An exception reaching the message loop ends the process, and
+        // a desktop application that vanishes tells the user nothing about why.
+        DispatcherUnhandledException += OnUnhandled;
+
         _engine = new WorkerProcessEngine(Locate());
 
         var viewModel = new MainViewModel(_engine, Dispatcher, JsonSettingsStore.Default());
@@ -28,6 +34,36 @@ public partial class App : System.Windows.Application, IDisposable
         // After the window is up: a failure to start the engine is a line in the status bar, not a
         // dialog before anything is visible.
         await viewModel.InitialiseAsync().ConfigureAwait(true);
+    }
+
+    /// <summary>
+    /// Turns an unhandled UI exception into a dialog instead of a disappearing window.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Not a way of ignoring bugs.</b> The application keeps running because closing it loses
+    /// the queue as well, and a failure in one button is rarely a reason to discard the rest — but
+    /// the user is told, in the same words the developer would need.
+    /// </para>
+    /// <para>
+    /// This exists because of a real one: opening the settings dialog killed the application
+    /// outright, with no message, no dialog and nothing on screen. Diagnosing it meant reading
+    /// Windows Error Reporting and then driving the button from a script to capture stderr. A
+    /// handler here would have put the exception on the screen the first time.
+    /// </para>
+    /// </remarks>
+    private void OnUnhandled(object sender, DispatcherUnhandledExceptionEventArgs e)
+    {
+        e.Handled = true;
+
+        // §2.3 C-6 keeps pixel data and full source paths out of logs. This is a crash report the
+        // user reads on their own screen, so the exception's own text is what it needs to carry.
+        MessageBox.Show(
+            MainWindow,
+            $"{e.Exception.GetType().Name}: {e.Exception.Message}\n\n{e.Exception.StackTrace}",
+            "Something went wrong",
+            MessageBoxButton.OK,
+            MessageBoxImage.Error);
     }
 
     /// <inheritdoc />

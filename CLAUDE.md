@@ -216,6 +216,43 @@ IoU 0인 채로 0.39%). IoU와 함께 읽어야 합니다.
   건드려 **−4.21 dB** 악화시킵니다. 8 px 헤일로로 설명되는 면적(약 0.43%)의 13배입니다.
 - 즉 **복원은 지금 닿는 곳마다 악화시킵니다** — 안에서 −0.69 dB, 밖에서 −4.21 dB.
 
+### 설정 창을 열면 앱이 죽었다 (D-40)
+
+만들어 놓은 설정 창을 사용자가 실기에서 처음 눌렀더니 **아무 메시지 없이 프로세스가 사라졌습니다.**
+
+원인은 `Directory.Build.props`의 **`InvariantGlobalization=true`** 였습니다. **WPF는 이 설정에서
+동작하지 않습니다** — `FrameworkElement.Language`가 `en-US`이고, 바인딩이 값을 변환할 때마다
+(`StringFormat`, 변환기, 심지어 int가 `Text`에 닿는 것) `XmlLanguage.GetSpecificCulture()`를
+거치는데, 불변 모드에서는 찾을 문화권이 없어 `InvalidOperationException`이 나고 그게 창의
+메시지 루프를 뚫고 나가 프로세스를 끝냅니다.
+
+```
+System.InvalidOperationException: Cannot find non-neutral culture related to 'en-us'.
+   at System.Windows.Markup.XmlLanguage.GetSpecificCulture()
+   at System.Windows.Data.BindingExpressionBase.GetCulture()
+```
+
+**빌드도 깨끗하고 기동도 깨끗합니다. 그런 바인딩이 처음 나올 때까지 기다립니다.** 메인 창에는
+하나도 없었습니다 — 행을 뷰모델에서 문자열로 만들어 두었기 때문인데(D-33의 시험 가능성 결정),
+그게 우연히 앱을 살려 두고 있었습니다. 설정 창의 슬라이더가 숫자를 표시하는 첫 사례였습니다.
+
+**App 프로젝트에서만** 끄고 나머지는 그대로 둡니다. 호스트 수준 스위치라 테스트 프로세스는
+불변 그대로입니다. 끄자마자 Globalization 분석기가 살아나 protocol 토큰의 문화권 의존
+`ToString()`을 바로 잡아냈습니다.
+
+**두 번째 결함이 진단을 어렵게 만들었습니다 — 앱에 `DispatcherUnhandledException` 처리기가
+없었습니다.** 예외가 메시지 루프에 닿으면 대화상자도 메시지도 없이 그냥 사라집니다. 원인을
+찾는 데 Windows 오류 보고에서 예외 *종류*를 읽고, 그다음 UI 자동화 스크립트로 버튼을 누르며
+stderr를 리디렉션해야 했습니다. 지금은 예외와 스택을 창에 띄우고 앱은 계속 돕니다.
+**버그를 무시하는 장치가 아니라, 버그 보고와 실종의 차이입니다.**
+
+같은 모양이 하나 더 있었습니다 — 파이썬 경로가 틀리면 `Process.Start`가 `Win32Exception`을
+던지는데 뷰모델의 catch가 그걸 안 잡고, 기동이 `async void`라 **창이 뜨기도 전에 프로세스가
+끝납니다.** 경계에서 감싸도록 고쳤습니다.
+
+가드: `ProjectConfigurationTests` — 프로젝트 파일을 **텍스트로 읽습니다.** 이 규칙은 컴파일
+시점에 표현할 방법이 아예 없기 때문입니다.
+
 ### 창의 버튼 넷이 동작하지 않았다 (D-37 · D-38 · D-39)
 
 사용자가 실기에서 처음 써 보고 알려온 것입니다. 넷 중 **둘은 없는 기능이었고 둘은 결함**이며,

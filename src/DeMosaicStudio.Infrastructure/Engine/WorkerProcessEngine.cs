@@ -86,8 +86,22 @@ public sealed class WorkerProcessEngine : IRestorationEngine, IAsyncDisposable, 
         info.ArgumentList.Add("demosaic_worker.main_loop");
         info.Environment["PYTHONPATH"] = _location.WorkerRoot;
 
-        _process = Process.Start(info)
-            ?? throw new InvalidOperationException($"could not start {_location.Interpreter}");
+        // A missing interpreter arrives as Win32Exception, which is the same failure as Start
+        // returning null and deserves the same shape. Left as it is, it escapes the view model's
+        // catch and - because start-up is an `async void` - ends the process with no window and no
+        // message. The path is in the text because "could not start the worker" without it is
+        // unactionable.
+        try
+        {
+            _process = Process.Start(info)
+                ?? throw new InvalidOperationException($"could not start {_location.Interpreter}");
+        }
+        catch (System.ComponentModel.Win32Exception exception)
+        {
+            throw new InvalidOperationException(
+                $"could not start {_location.Interpreter}: {exception.Message}", exception);
+        }
+
         _stdin = _process.StandardInput;
 
         var ready = await ExchangeAsync(

@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using DeMosaicStudio.Application.Settings;
 using DeMosaicStudio.Domain.Settings;
@@ -57,8 +58,15 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     public static IReadOnlyList<EncoderProfile> Profiles { get; } = Enum.GetValues<EncoderProfile>();
 
     /// <summary>The temporal window choices, as the protocol spells them.</summary>
+    /// <remarks>
+    /// Invariant, because these are protocol tokens rather than numbers being shown to someone:
+    /// the same strings go into the fingerprint and onto the wire.
+    /// </remarks>
     public static IReadOnlyList<string> TemporalWindows { get; } =
-        ["auto", .. TemporalWindowSetting.AllowedValues.Select(k => k.ToString())];
+    [
+        "auto",
+        .. TemporalWindowSetting.AllowedValues.Select(k => k.ToString(CultureInfo.InvariantCulture)),
+    ];
 
     /// <summary>Detection confidence threshold (§5.2.3).</summary>
     public double Confidence
@@ -179,7 +187,8 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         Restoration = _original.Restoration with
         {
             Preset = Preset,
-            TemporalWindow = int.TryParse(TemporalWindow, out var k)
+            // Invariant on the way back too: this is the same protocol token, round-tripped.
+            TemporalWindow = int.TryParse(TemporalWindow, CultureInfo.InvariantCulture, out var k)
                 && TemporalWindowSetting.AllowedValues.Contains(k)
                     ? TemporalWindowSetting.Fixed(k)
                     : TemporalWindowSetting.Auto,

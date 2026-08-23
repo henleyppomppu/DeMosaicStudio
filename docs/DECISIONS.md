@@ -1287,3 +1287,65 @@ at the job's index, and moves a row whose position changed — a retry appends, 
   scroll position or an in-progress rubber-band drag.
 - **Rate-limiting the host's redraw instead.** Treats the symptom, and the correct interval is a
   guess that would be wrong on some machine.
+
+---
+
+## D-40 — WPF opts out of invariant globalization, and the window says when it breaks
+
+**Status:** accepted (2026-08-23) · **Fixes:** the settings dialog ending the process
+
+### Context
+
+`Directory.Build.props` sets `InvariantGlobalization=true` for every project. For Domain,
+Application and the tests that is right — it is what keeps parsing and formatting identical
+whatever locale the machine has, and this machine is Korean.
+
+**WPF does not run under it.** `FrameworkElement.Language` defaults to the XML language `en-US`, and
+`BindingExpression.TransferValue` resolves it through `XmlLanguage.GetSpecificCulture()` whenever a
+binding converts a value — a `StringFormat`, a converter, or an int reaching a `Text` property. With
+the switch on there is no non-neutral culture to find:
+
+```
+System.InvalidOperationException: Cannot find non-neutral culture related to 'en-us'.
+   at System.Windows.Markup.XmlLanguage.GetSpecificCulture()
+   at System.Windows.Data.BindingExpressionBase.GetCulture()
+   ...
+   at System.Windows.Window.ShowDialog()
+   at DeMosaicStudio.App.Views.MainWindow.OnSettings(...)
+```
+
+It builds clean and starts clean. It waits for the first such binding. The main window has none —
+its rows are formatted into strings in the view model, which was a decision about testability
+(D-33) and turns out to have been what kept the application alive. The settings dialog's sliders
+show numbers, so it was the first, and opening Settings killed the application.
+
+### Decision
+
+`InvariantGlobalization=false` in `DeMosaicStudio.App.csproj` only. It is a host-level switch read
+from the entry assembly's runtime configuration, so it governs the application's own process and
+leaves every test process invariant.
+
+The exemption stays one project rather than becoming a habit. Turning it off also re-enabled the
+Globalization analyzers in that project, which immediately found a culture-sensitive `ToString()`
+on a protocol token — so the narrow scope pays for itself.
+
+### The second defect, which is why this was hard
+
+**The application had no `DispatcherUnhandledException` handler.** An exception reaching the message
+loop ended the process with no dialog, no message and nothing on screen. Diagnosing it took Windows
+Error Reporting for the exception *type*, and then a UI-automation script driving the button with
+stderr redirected, because the process was gone before anything could be read.
+
+A handler now shows the exception and its stack, and keeps the application running: a failure in one
+button is rarely a reason to discard the queue as well. It is not a way of ignoring bugs — it is the
+difference between a bug report and a disappearance.
+
+`WorkerProcessEngine.StartAsync` was the same shape: a missing interpreter arrives as
+`Win32Exception`, which the view model's catch did not cover, and start-up is an `async void` — so a
+bad interpreter path ended the process before the window appeared. It is now wrapped as the
+`InvalidOperationException` the caller already handles, with the path in the message.
+
+### Guards
+
+`ProjectConfigurationTests`. It reads the project files as text, which is unusual and is the point:
+this rule has no compile-time expression at all.

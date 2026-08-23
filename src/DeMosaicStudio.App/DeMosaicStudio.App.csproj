@@ -14,6 +14,25 @@
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <RootNamespace>DeMosaicStudio.App</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+
+    <!--
+      **WPF does not run under invariant globalization**, and this is the one project that runs it.
+
+      `FrameworkElement.Language` defaults to the XML language "en-US", and any binding that has to
+      convert a value - a `StringFormat`, a converter, or simply an int reaching a `Text` property -
+      resolves it through `XmlLanguage.GetSpecificCulture()`. With the invariant switch on there is
+      no non-neutral culture to find, so that call throws `InvalidOperationException` and the
+      exception escapes through the window's message loop, which ends the process.
+
+      The failure is not at start-up and not at build: it waits for the first such binding. The main
+      window has none, because its rows are formatted into strings in the view model, so the
+      application ran for weeks before the settings dialog - whose sliders show numbers - made the
+      first one. Opening Settings killed the app.
+
+      Every other project keeps the invariant setting from Directory.Build.props. It is a host-level
+      switch, so this one governs only the application's own process.
+    -->
+    <InvariantGlobalization>false</InvariantGlobalization>
   </PropertyGroup>
 
   <ItemGroup>
