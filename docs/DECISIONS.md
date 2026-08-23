@@ -1101,3 +1101,56 @@ x265 has been told something untrue about their output.
   written before there was a pipeline to measure.
 - If detection and alignment ever drop by an order of magnitude, this is worth re-reading. Until
   then the two of them are 97% of the cost and the encoder is a rounding error.
+
+---
+
+## D-36 — A retraining measured on one film is not evidence that it generalised
+
+**Status:** accepted (2026-08-23) · **Qualifies:** the v0.2.0 detector decision
+
+### Context
+
+The corpus was 24 clips of Tears of Steel. v0.2.0 was retrained on widened negatives, and the
+retraining was justified by measurement: video-level firing fell 18.8% → 9.4% for 0.032 of IoU. Two
+more films — Sintel and Big Buck Bunny — now say what that measurement could not.
+
+### Measured, on clean frames the detector has never seen
+
+Fraction producing at least one region. §5.2.5a asks for **≤ 0.5%**.
+
+| threshold | 0.5 | 0.9 | 0.99 | 0.999 |
+| --- | ---: | ---: | ---: | ---: |
+| **v0.1.0** tos / sintel / bbb | 80.6 / 77.8 / 89.6% | 48.6 / 41.7 / 73.6% | 17.4 / 11.1 / 41.7% | 4.2 / **1.4** / 10.4% |
+| **v0.2.0** tos / sintel / bbb | 56.2 / 61.8 / 84.0% | 30.6 / 26.4 / 47.2% | 7.6 / 13.2 / 26.4% | 3.5 / **6.2** / 16.7% |
+
+Two things, and the second is the one that matters.
+
+**No threshold on either model meets §5.2.5a on any source.** The best figure anywhere is 1.4%, at
+an operating point that would detect nothing.
+
+**v0.2.0 is better than v0.1.0 on Tears of Steel at every threshold, and worse on both unseen films
+at the high ones** — 1.4% → 6.2% on Sintel, 10.4% → 16.7% on Big Buck Bunny. That is what
+overfitting to a negatives corpus looks like from outside: the model learned which textures *in this
+film* are not mosaics.
+
+### Decision
+
+v0.2.0 stays, because the pipeline ships threshold 0.5 and it is better there on all three sources.
+What does not stand is the claim that the retraining generalised, and `docs/phase1-detector-report.md`
+should be read with this next to it.
+
+**§5.2.5a cannot be met by tuning.** No threshold reaches it. That is a training-data problem, which
+is what `scripts/fetch_negatives.py` and the collected negatives are for.
+
+### Consequences
+
+- **Any measurement on one source is a measurement of that source** until a second one agrees. This
+  is the fifth time this repository has drawn a conclusion that a second measurement overturned;
+  it is the first time the second measurement was different *content* rather than a different
+  method.
+- **Flat cartoon shading is the worst case by a wide margin** — 84% at the shipped threshold, 16.7%
+  even at 0.999. Large regions of near-constant colour with hard edges and no grain is what a mosaic
+  looks like when nothing is wrong.
+- The restorer is content-dependent too: **+7.05 dB** on the screen-anchored clip, **+0.39** on
+  Sintel, **−0.07** on Big Buck Bunny. Every headline this project has quoted came from the first.
+  Future figures belong per content class or as a range, never as one number.
