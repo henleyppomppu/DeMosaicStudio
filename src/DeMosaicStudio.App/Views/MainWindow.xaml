@@ -7,22 +7,22 @@
 
     <DockPanel>
         <Menu DockPanel.Dock="Top">
-            <MenuItem Header="_File">
-                <MenuItem Header="_Add videos…" Click="OnAdd" InputGestureText="Ctrl+O" />
-                <MenuItem Header="Add _folder…" Click="OnAddFolder" />
+            <MenuItem Header="파일(_F)">
+                <MenuItem Header="영상 추가(_A)…" Click="OnAdd" InputGestureText="Ctrl+O" />
+                <MenuItem Header="폴더 추가(_D)…" Click="OnAddFolder" />
                 <Separator />
-                <MenuItem Header="_Remove selected" Click="OnRemove" InputGestureText="Del" />
+                <MenuItem Header="선택 항목 제거(_R)" Click="OnRemove" InputGestureText="Del" />
                 <Separator />
-                <MenuItem Header="E_xit" Click="OnExit" />
+                <MenuItem Header="끝내기(_X)" Click="OnExit" />
             </MenuItem>
-            <MenuItem Header="_Queue">
-                <MenuItem Header="_Start" Click="OnStart" IsEnabled="{Binding CanStart}" />
-                <MenuItem Header="Sto_p" Click="OnStop" IsEnabled="{Binding CanStop}" />
+            <MenuItem Header="대기열(_Q)">
+                <MenuItem Header="시작(_S)" Click="OnStart" IsEnabled="{Binding CanStart}" />
+                <MenuItem Header="중지(_P)" Click="OnStop" IsEnabled="{Binding CanStop}" />
                 <Separator />
-                <MenuItem Header="Re_try selected" Click="OnRetry" />
+                <MenuItem Header="선택 항목 다시 시도(_T)" Click="OnRetry" />
             </MenuItem>
-            <MenuItem Header="_Tools">
-                <MenuItem Header="_Settings…" Click="OnSettings" />
+            <MenuItem Header="도구(_T)">
+                <MenuItem Header="설정(_S)…" Click="OnSettings" />
             </MenuItem>
         </Menu>
 
@@ -35,27 +35,27 @@
             </Grid.RowDefinitions>
 
             <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,10">
-                <Button Content="Add videos…" Click="OnAdd" />
-                <Button Content="Remove" Click="OnRemove" />
-                <Button Content="Retry" Click="OnRetry" />
+                <Button Content="영상 추가…" Click="OnAdd" />
+                <Button Content="제거" Click="OnRemove" />
+                <Button Content="다시 시도" Click="OnRetry" />
                 <Separator Width="12" Opacity="0" />
-                <Button Content="Start" Click="OnStart" IsEnabled="{Binding CanStart}" />
-                <Button Content="Stop" Click="OnStop" IsEnabled="{Binding CanStop}" />
+                <Button Content="시작" Click="OnStart" IsEnabled="{Binding CanStart}" />
+                <Button Content="중지" Click="OnStop" IsEnabled="{Binding CanStop}" />
                 <Separator Width="12" Opacity="0" />
-                <Button Content="Settings…" Click="OnSettings" />
+                <Button Content="설정…" Click="OnSettings" MinWidth="76" />
             </StackPanel>
 
             <Grid Grid.Row="1">
                 <ListView x:Name="Jobs" ItemsSource="{Binding Rows}" SelectionMode="Extended">
                     <ListView.View>
                         <GridView>
-                            <GridViewColumn Header="Video" Width="280"
+                            <GridViewColumn Header="영상" Width="280"
                                             DisplayMemberBinding="{Binding Name}" />
-                            <GridViewColumn Header="Status" Width="100"
+                            <GridViewColumn Header="상태" Width="100"
                                             DisplayMemberBinding="{Binding Status}" />
-                            <GridViewColumn Header="Progress" Width="80"
+                            <GridViewColumn Header="진행" Width="70"
                                             DisplayMemberBinding="{Binding Progress}" />
-                            <GridViewColumn Header="Detail" Width="380"
+                            <GridViewColumn Header="내용" Width="390"
                                             DisplayMemberBinding="{Binding Detail}" />
                         </GridView>
                     </ListView.View>
@@ -65,7 +65,7 @@
                 <TextBlock IsHitTestVisible="False" Opacity="0.45"
                            HorizontalAlignment="Center" VerticalAlignment="Center"
                            TextAlignment="Center"
-                           Text="Drop videos or a folder here&#x0a;or use Add videos…">
+                           Text="영상이나 폴더를 여기에 끌어다 놓으세요&#x0a;또는 &quot;영상 추가…&quot;">
                     <TextBlock.Style>
                         <Style TargetType="TextBlock">
                             <Setter Property="Visibility" Value="Collapsed" />
@@ -84,9 +84,11 @@
             <!--
                 prd.md §1.3. The output is an estimate wherever the mosaic destroyed information, and
                 the application says so where the user is looking rather than only in a summary field.
+                The Korean must keep all three claims: generated from other frames, an estimate, and
+                not a record of what was there.
             -->
             <TextBlock Grid.Row="3" Margin="0,6,0,0" TextWrapping="Wrap" Opacity="0.65"
-                       Text="Restored areas are generated from surrounding frames. They are an estimate, not recovered original detail, and must not be treated as a record of what was there." />
+                       Text="복원된 영역은 주변 프레임으로부터 만들어 낸 것입니다. 추정이지 되찾은 원본이 아니며, 그곳에 무엇이 있었는지에 대한 기록으로 취급해서는 안 됩니다." />
         </Grid>
     </DockPanel>
 </Window>

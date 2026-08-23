@@ -1,6 +1,7 @@
-using System.ComponentModel;
+using System.Globalization;
 using System.IO;
 using System.Windows;
+using System.Windows.Markup;
 using System.Windows.Threading;
 using DeMosaicStudio.App.ViewModels;
 using DeMosaicStudio.App.Views;
@@ -18,6 +19,8 @@ public partial class App : System.Windows.Application, IDisposable
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        UseKorean();
 
         // Before anything can throw. An exception reaching the message loop ends the process, and
         // a desktop application that vanishes tells the user nothing about why.
@@ -61,9 +64,39 @@ public partial class App : System.Windows.Application, IDisposable
         MessageBox.Show(
             MainWindow,
             $"{e.Exception.GetType().Name}: {e.Exception.Message}\n\n{e.Exception.StackTrace}",
-            "Something went wrong",
+            "예상하지 못한 오류",
             MessageBoxButton.OK,
             MessageBoxImage.Error);
+    }
+
+    /// <summary>Puts the whole application into Korean, rather than whatever the machine says.</summary>
+    /// <remarks>
+    /// <para>
+    /// Three settings, because they are three different things.
+    /// <see cref="CultureInfo.CurrentUICulture"/> chooses which resources load;
+    /// <see cref="CultureInfo.CurrentCulture"/> chooses how numbers and dates are written; and
+    /// <c>FrameworkElement.Language</c> is what a <b>binding</b> consults, which is neither of the
+    /// first two — WPF's default for it is the XML language "en-US" and it stays that way however
+    /// the thread is set up.
+    /// </para>
+    /// <para>
+    /// Set explicitly rather than left to the machine, so the window reads the same on a machine
+    /// that is not Korean and so a change lives in one place. This is also the property whose
+    /// resolution ended the process under invariant globalization (D-40): setting it here is not
+    /// what fixed that, the opt-out in the project file is.
+    /// </para>
+    /// </remarks>
+    private static void UseKorean()
+    {
+        var korean = new CultureInfo("ko-KR");
+        CultureInfo.DefaultThreadCurrentCulture = korean;
+        CultureInfo.DefaultThreadCurrentUICulture = korean;
+        CultureInfo.CurrentCulture = korean;
+        CultureInfo.CurrentUICulture = korean;
+
+        FrameworkElement.LanguageProperty.OverrideMetadata(
+            typeof(FrameworkElement),
+            new FrameworkPropertyMetadata(XmlLanguage.GetLanguage(korean.IetfLanguageTag)));
     }
 
     /// <inheritdoc />

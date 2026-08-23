@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="clr-namespace:DeMosaicStudio.App.ViewModels"
-        Title="Settings" Height="620" Width="560"
+        Title="설정" Height="640" Width="580"
         WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
         ResizeMode="CanResizeWithGrip">
 
@@ -26,15 +26,15 @@
     <DockPanel Margin="14">
         <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
                     HorizontalAlignment="Right" Margin="0,12,0,0">
-            <Button Content="Restore defaults" Click="OnRestoreDefaults" MinWidth="120" />
-            <Button Content="Cancel" Click="OnCancel" IsCancel="True" />
-            <Button Content="OK" Click="OnAccept" IsDefault="True" Margin="0" />
+            <Button Content="기본값으로" Click="OnRestoreDefaults" MinWidth="110" />
+            <Button Content="취소" Click="OnCancel" IsCancel="True" />
+            <Button Content="확인" Click="OnAccept" IsDefault="True" Margin="0" />
         </StackPanel>
 
         <TabControl>
-            <TabItem Header="Detection">
+            <TabItem Header="탐지">
                 <StackPanel Margin="14">
-                    <TextBlock Style="{StaticResource Label}" Text="Detection confidence" />
+                    <TextBlock Style="{StaticResource Label}" Text="탐지 확신도" />
                     <DockPanel>
                         <TextBlock DockPanel.Dock="Right" Width="46" TextAlignment="Right"
                                    Text="{Binding Confidence, StringFormat=F2}" />
@@ -42,9 +42,9 @@
                                 Value="{Binding Confidence}" />
                     </DockPanel>
                     <TextBlock Style="{StaticResource Hint}"
-                               Text="How sure the detector must be before a region counts. Lower finds more and fires on more that is not a mosaic — on ordinary footage this detector already fires far more often than it should, so lowering it is rarely the answer." />
+                               Text="모자이크라고 판정하기 전에 탐지기가 얼마나 확신해야 하는지. 낮추면 더 많이 찾지만 모자이크가 아닌 것에도 더 많이 반응합니다 — 이 탐지기는 평범한 영상에서도 이미 과하게 반응하므로, 낮추는 것이 답인 경우는 드뭅니다." />
 
-                    <TextBlock Style="{StaticResource Label}" Text="Mask threshold" />
+                    <TextBlock Style="{StaticResource Label}" Text="마스크 임계값" />
                     <DockPanel>
                         <TextBlock DockPanel.Dock="Right" Width="46" TextAlignment="Right"
                                    Text="{Binding MaskThreshold, StringFormat=F2}" />
@@ -52,9 +52,9 @@
                                 Value="{Binding MaskThreshold}" />
                     </DockPanel>
                     <TextBlock Style="{StaticResource Hint}"
-                               Text="Where the detector's probability map is cut into a yes/no mask." />
+                               Text="탐지기가 낸 확률 지도를 어디에서 잘라 예/아니오 마스크로 만들지." />
 
-                    <TextBlock Style="{StaticResource Label}" Text="Smallest region (pixels)" />
+                    <TextBlock Style="{StaticResource Label}" Text="가장 작은 영역 (화소)" />
                     <DockPanel>
                         <TextBlock DockPanel.Dock="Right" Width="46" TextAlignment="Right"
                                    Text="{Binding MinRegionArea}" />
@@ -62,9 +62,9 @@
                                 Value="{Binding MinRegionArea}" />
                     </DockPanel>
                     <TextBlock Style="{StaticResource Hint}"
-                               Text="Regions smaller than this are ignored." />
+                               Text="이보다 작은 영역은 무시합니다." />
 
-                    <TextBlock Style="{StaticResource Label}" Text="Confirmations before restoring" />
+                    <TextBlock Style="{StaticResource Label}" Text="복원 전 확인 프레임 수" />
                     <DockPanel>
                         <TextBlock DockPanel.Dock="Right" Width="46" TextAlignment="Right"
                                    Text="{Binding MinConfirmFrames}" />
@@ -72,33 +72,35 @@
                                 Value="{Binding MinConfirmFrames}" />
                     </DockPanel>
                     <TextBlock Style="{StaticResource Hint}"
-                               Text="Consecutive frames a region must be seen in before it is touched. Raising it is the cheapest defence against a single-frame false positive." />
+                               Text="한 영역을 건드리기 전에 연속 몇 프레임에서 보여야 하는지. 한 프레임짜리 오탐을 막는 가장 값싼 방법입니다." />
 
-                    <TextBlock Style="{StaticResource Label}" Text="Frames a track survives unseen" />
+                    <TextBlock Style="{StaticResource Label}" Text="놓쳐도 유지할 프레임 수" />
                     <DockPanel>
                         <TextBlock DockPanel.Dock="Right" Width="46" TextAlignment="Right"
                                    Text="{Binding MaxMissingFrames}" />
                         <Slider Minimum="0" Maximum="15" TickFrequency="1"
                                 Value="{Binding MaxMissingFrames}" />
                     </DockPanel>
+                    <TextBlock Style="{StaticResource Hint}"
+                               Text="탐지가 잠깐 끊겨도 추적을 몇 프레임까지 이어갈지." />
                 </StackPanel>
             </TabItem>
 
-            <TabItem Header="Restoration">
+            <TabItem Header="복원">
                 <StackPanel Margin="14">
-                    <TextBlock Style="{StaticResource Label}" Text="Quality preset" />
+                    <TextBlock Style="{StaticResource Label}" Text="품질 사전 설정" />
                     <ComboBox ItemsSource="{x:Static vm:SettingsViewModel.Presets}"
                               SelectedItem="{Binding Preset}" Margin="0,0,0,4" />
                     <TextBlock Style="{StaticResource Hint}"
-                               Text="Trades throughput against temporal context." />
+                               Text="처리 속도와 시간 문맥의 크기를 맞바꿉니다. Fast · Balanced · Quality 순으로 느려지고 좋아집니다." />
 
-                    <TextBlock Style="{StaticResource Label}" Text="Temporal window" />
+                    <TextBlock Style="{StaticResource Label}" Text="시간 창" />
                     <ComboBox ItemsSource="{x:Static vm:SettingsViewModel.TemporalWindows}"
                               SelectedItem="{Binding TemporalWindow}" Margin="0,0,0,4" />
                     <TextBlock Style="{StaticResource Hint}"
-                               Text="How many neighbouring frames feed one restoration. Auto chooses per frame from motion; a fixed value replaces only that choice, and the safety reductions still apply." />
+                               Text="한 번의 복원에 이웃 프레임을 몇 장 쓸지. auto는 움직임을 보고 프레임마다 정합니다. 고정값을 골라도 장면 전환·메모리 부족 같은 안전 규칙에 따른 축소는 그대로 적용됩니다." />
 
-                    <TextBlock Style="{StaticResource Label}" Text="Minimum alignment confidence" />
+                    <TextBlock Style="{StaticResource Label}" Text="최소 정렬 확신도" />
                     <DockPanel>
                         <TextBlock DockPanel.Dock="Right" Width="46" TextAlignment="Right"
                                    Text="{Binding AlignConfMin, StringFormat=F2}" />
@@ -106,9 +108,9 @@
                                 Value="{Binding AlignConfMin}" />
                     </DockPanel>
                     <TextBlock Style="{StaticResource Hint}"
-                               Text="Neighbours aligned less confidently than this are not used as evidence." />
+                               Text="이보다 낮게 정렬된 이웃 프레임은 근거로 쓰지 않습니다." />
 
-                    <TextBlock Style="{StaticResource Label}" Text="Confidence gate" />
+                    <TextBlock Style="{StaticResource Label}" Text="확신도 게이트" />
                     <DockPanel>
                         <TextBlock DockPanel.Dock="Right" Width="46" TextAlignment="Right"
                                    Text="{Binding MinRestorationConfidence, StringFormat=F2}" />
@@ -116,9 +118,9 @@
                                 Value="{Binding MinRestorationConfidence}" />
                     </DockPanel>
                     <TextBlock Style="{StaticResource Hint}"
-                               Text="Zero is off. Above zero, a region the pipeline is not confident about keeps its original pixels instead of being replaced by a guess. The setting is sharp near its useful value — measured on one clip, 0.87 lost quality and 0.88 gained it." />
+                               Text="0이면 끕니다. 0보다 크면, 확신이 부족한 영역은 추측으로 덮어쓰는 대신 원본 화소를 그대로 둡니다. 쓸모 있는 구간 근처에서 매우 예민합니다 — 한 클립에서 재보니 0.87은 품질을 잃고 0.88은 얻었습니다." />
 
-                    <TextBlock Style="{StaticResource Label}" Text="Feather width (pixels)" />
+                    <TextBlock Style="{StaticResource Label}" Text="경계 번짐 폭 (화소)" />
                     <DockPanel>
                         <TextBlock DockPanel.Dock="Right" Width="46" TextAlignment="Right"
                                    Text="{Binding FeatherWidth}" />
@@ -126,23 +128,23 @@
                                 Value="{Binding FeatherWidth}" />
                     </DockPanel>
                     <TextBlock Style="{StaticResource Hint}"
-                               Text="How far the restored area is blended into its surroundings." />
+                               Text="복원한 영역을 주변에 얼마나 넓게 섞어 넣을지." />
                 </StackPanel>
             </TabItem>
 
-            <TabItem Header="Output">
+            <TabItem Header="출력">
                 <StackPanel Margin="14">
-                    <TextBlock Style="{StaticResource Label}" Text="Codec" />
+                    <TextBlock Style="{StaticResource Label}" Text="코덱" />
                     <ComboBox ItemsSource="{x:Static vm:SettingsViewModel.Codecs}"
                               SelectedItem="{Binding Codec}" Margin="0,0,0,10" />
 
-                    <TextBlock Style="{StaticResource Label}" Text="Encoder" />
+                    <TextBlock Style="{StaticResource Label}" Text="인코더" />
                     <ComboBox ItemsSource="{x:Static vm:SettingsViewModel.Profiles}"
                               SelectedItem="{Binding Profile}" Margin="0,0,0,4" />
                     <TextBlock Style="{StaticResource Hint}"
-                               Text="x265 reaches transparency at a lower bitrate; NVENC is for long files and iteration." />
+                               Text="QualityX265는 더 낮은 비트레이트에서 원본과 구분되지 않는 지점에 도달합니다. SpeedNvenc는 긴 파일과 반복 실험용입니다." />
 
-                    <TextBlock Style="{StaticResource Label}" Text="Constant quality" />
+                    <TextBlock Style="{StaticResource Label}" Text="고정 품질" />
                     <DockPanel>
                         <TextBlock DockPanel.Dock="Right" Width="46" TextAlignment="Right"
                                    Text="{Binding ConstantQuality}" />
@@ -150,10 +152,10 @@
                                 Value="{Binding ConstantQuality}" />
                     </DockPanel>
                     <TextBlock Style="{StaticResource Hint}"
-                               Text="Lower is better and larger." />
+                               Text="낮을수록 좋고 파일이 커집니다." />
 
                     <TextBlock Style="{StaticResource Hint}" Margin="0,14,0,0"
-                               Text="A video the pipeline changed nothing in is copied rather than re-encoded, so these settings do not touch it at all. They apply only where something was restored." />
+                               Text="파이프라인이 아무것도 바꾸지 않은 영상은 다시 인코딩하지 않고 그대로 복사합니다. 그러니 이 설정들은 실제로 복원이 일어난 파일에만 적용됩니다." />
                 </StackPanel>
             </TabItem>
         </TabControl>

@@ -1349,3 +1349,68 @@ bad interpreter path ended the process before the window appeared. It is now wra
 
 `ProjectConfigurationTests`. It reads the project files as text, which is unusual and is the point:
 this rule has no compile-time expression at all.
+
+---
+
+## D-41 — The window is Korean, translated in place
+
+**Status:** accepted (2026-08-23) · **Revises:** prd.md §20 Q6
+
+### Context
+
+Q6 answered "English only, strings externalized — low value under D-11, kept because it costs
+nothing now and costs a refactor later." The one user this application is for (D-11) is Korean and
+asked for a Korean window, so "English only" was an assumption rather than a requirement.
+
+The second half of that answer had not been done either. The UI text was XAML literals and string
+switches in the view model, so the externalization that was supposed to make this cheap did not
+exist when the moment arrived.
+
+### Decision
+
+Korean, written directly where it is shown: the XAML for the two windows, the display strings in
+`MainViewModel` and `JobRow`.
+
+**A resource file was considered and rejected — for now.** The honest accounting:
+
+- The dialog carries about twenty explanatory sentences, several of them long. Replacing them with
+  resource keys makes the layout unreadable at exactly the place where the wording matters most.
+- A `.resx` reachable from XAML needs a *public* generated accessor, which the SDK's generator does
+  not produce; the workaround is a hand-written façade, which is the duplicated edit surface this
+  was meant to avoid.
+- The application has one user and one language.
+
+So the refactor Q6 hoped to pre-pay for is still ahead, and it is now the price of a second
+language. That is a known, bounded cost rather than a surprise, which is the only claim being made.
+
+### Two things that are deliberately *not* translated
+
+**Error-code meanings.** `ErrorCodes` is locked to `worker/demosaic_worker/errors.py` by
+`fixtures/parity/error_codes.json` (§13.4) and printed in `docs/ERROR_CODES.md`. Translating in
+place would break the fixture and change what two implementations agree on. `ErrorText` in
+Application holds a Korean line *beside* each code, the number is always shown with it, and
+`ErrorTextTests` fails if a code has no line — or if a line has no code, which is how a typo in a
+key would otherwise stay invisible. An unknown code falls back to the English meaning rather than
+throwing: a newer worker may report one, and losing the failure over its wording would be worse.
+
+**Enumeration values** — `Balanced`, `H265`, `QualityX265`, `auto`. They are the tokens written to
+`settings.json` and sent on the wire; a translated label would stop matching the file the user can
+open. The hint under each combo box explains them in Korean instead.
+
+### Culture
+
+`UseKorean()` sets three things, because they are three different things: `CurrentUICulture` picks
+resources, `CurrentCulture` picks number and date formatting, and `FrameworkElement.Language` is
+what a **binding** consults — WPF defaults that to the XML language `en-US` and leaves it there
+however the thread is configured. It is set explicitly rather than read from the machine so the
+window reads the same anywhere.
+
+That third one is the property whose resolution ended the process under invariant globalization
+(D-40). Setting it here is not what fixed that; the project-file opt-out is.
+
+### Verified
+
+Driven through UI automation against the real executable: menus, buttons, column headers, the empty
+-state hint and the §1.3 disclaimer in the main window; the title, three tab headers, buttons and
+labels in the settings dialog. Numbers render `0.45`, `0.50` — Korean uses the same decimal point,
+so the values are unchanged.

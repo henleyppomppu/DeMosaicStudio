@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Windows.Threading;
+using DeMosaicStudio.Application.Diagnostics;
 using DeMosaicStudio.Application.Engine;
 using DeMosaicStudio.Application.Jobs;
 using DeMosaicStudio.Application.Settings;
@@ -33,7 +34,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private readonly ISettingsStore _store;
 
     private CancellationTokenSource? _running;
-    private string _status = "Not started";
+    private string _status = "아직 시작하지 않았습니다";
     private bool _isBusy;
     private bool _isStopping;
     private int _nextId;
@@ -100,7 +101,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
         if (!_store.Save(Settings))
         {
-            Status = "Settings applied to this session, but could not be saved for the next one";
+            Status = "설정을 이번 실행에는 적용했지만 다음 실행을 위해 저장하지는 못했습니다";
         }
     }
 
@@ -111,12 +112,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             var capabilities = await _engine.StartAsync().ConfigureAwait(true);
             Status = capabilities.CudaAvailable
-                ? $"Engine {capabilities.Version} on {capabilities.Device}"
-                : $"Engine {capabilities.Version} on CPU — restoration will be slow";
+                ? $"엔진 {capabilities.Version} · {capabilities.Device}"
+                : $"엔진 {capabilities.Version} · CPU — 복원이 매우 느립니다";
         }
         catch (Exception exception) when (exception is InvalidOperationException or IOException)
         {
-            Status = $"The engine did not start: {exception.Message}";
+            Status = $"엔진을 시작하지 못했습니다: {exception.Message}";
         }
     }
 
@@ -154,9 +155,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
         Status = files.Count switch
         {
-            0 => "Nothing to add — no video files in what was dropped",
-            1 => $"Queued {Path.GetFileName(files[0])}",
-            _ => $"Queued {files.Count} videos",
+            0 => "추가할 것이 없습니다 — 놓은 것 중에 영상 파일이 없습니다",
+            1 => $"{Path.GetFileName(files[0])} 을(를) 대기열에 넣었습니다",
+            _ => $"영상 {files.Count}개를 대기열에 넣었습니다",
         };
 
         return files.Count;
@@ -227,17 +228,17 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
         foreach (var pending in _jobs.Runnable)
         {
-            _jobs.Report(pending.Id, JobStatus.Cancelled, "Cancelled before it started");
+            _jobs.Report(pending.Id, JobStatus.Cancelled, "시작하기 전에 취소되었습니다");
         }
 
         Status = _jobs.Active is { } active
-            ? $"Stopping {Path.GetFileName(active.SourcePath)} — waiting for it to checkpoint"
-            : "Stopping";
+            ? $"{Path.GetFileName(active.SourcePath)} 중지 중 — 체크포인트를 쓸 때까지 기다립니다"
+            : "중지 중";
     }
 
     private async Task RunAsync(Job job, CancellationToken cancellationToken)
     {
-        _jobs.Report(job.Id, JobStatus.Probing, "Starting");
+        _jobs.Report(job.Id, JobStatus.Probing, "시작하는 중");
 
         var progress = new Progress<EngineProgress>(
             report => _dispatcher.Invoke(() => _jobs.Report(report)));
@@ -262,7 +263,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             _jobs.Complete(job.Id, new EngineOutcome
             {
                 Status = JobStatus.Cancelled,
-                Message = "Cancelled",
+                Message = "취소되었습니다",
             });
         }
         catch (Exception exception) when (exception is InvalidOperationException or IOException)
@@ -284,17 +285,17 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         if (outcome.Status != JobStatus.Completed || outcome.Summary is not { } summary)
         {
             return outcome.Error is { } error
-                ? $"{error.Code}: {error.Meaning}"
+                ? ErrorText.Line(error)
                 : outcome.Message ?? string.Empty;
         }
 
         if (summary.Passthrough)
         {
-            return "Nothing found — the video was copied, not re-encoded";
+            return "찾은 것이 없어 다시 인코딩하지 않고 그대로 복사했습니다";
         }
 
-        return $"{summary.RegionsDetected} regions over {summary.FramesRestored} frames — "
-             + "restored areas are estimated, not recovered";
+        return $"{summary.FramesRestored}개 프레임에서 영역 {summary.RegionsDetected}개 — "
+             + "복원된 영역은 추정이지 되찾은 원본이 아닙니다";
     }
 
     /// <summary>Reconciles the rows against the list, in place.</summary>
@@ -441,13 +442,13 @@ public sealed class JobRow : INotifyPropertyChanged
 
         Status = job.Status switch
         {
-            JobStatus.Pending => "Waiting",
-            JobStatus.Probing => "Inspecting",
-            JobStatus.Analyzing => "Analysing",
-            JobStatus.Processing => "Restoring",
-            JobStatus.Completed => "Done",
-            JobStatus.Cancelled => "Cancelled",
-            _ => "Failed",
+            JobStatus.Pending => "대기 중",
+            JobStatus.Probing => "확인 중",
+            JobStatus.Analyzing => "분석 중",
+            JobStatus.Processing => "복원 중",
+            JobStatus.Completed => "완료",
+            JobStatus.Cancelled => "취소됨",
+            _ => "실패",
         };
         Progress = job.Fraction is { } fraction ? $"{fraction:P0}" : string.Empty;
         Detail = job.Message ?? string.Empty;

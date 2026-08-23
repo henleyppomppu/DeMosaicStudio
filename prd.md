@@ -2505,7 +2505,7 @@ can start without any of them.
 | Q3 | Which clean-video sources may be used for training? | **ANSWERED (v3.0):** unblocked by D-11 — personal non-commercial training. Origins still recorded (§11.2), §2.3 C-2 still binds. Closed |
 | Q4 | Is batch/folder processing needed for v1, or is single-job acceptable? (§2.2) | Single job |
 | Q5 | Is 4K a v1 requirement? It changes tiling and VRAM work materially | v1 handles 4K at reduced throughput; not a performance target |
-| Q6 | Localization scope beyond English? | English only, strings externalized. Low value under D-11 — kept because it costs nothing now and costs a refactor later |
+| Q6 | Localization scope beyond English? | **REVISED (2026-08-23):** Korean only, translated in place. The one user is Korean; "English only" was an assumption, not a requirement. Externalization was never actually done — the UI text was XAML literals — so the refactor this answer hoped to avoid is still ahead, and is now the price of adding a second language. Accepted knowingly (D-41). Error-code *meanings* stay English: they are locked to the worker by §13.4's parity fixture, so the Korean sits beside them |
 | Q7 | Is a "detect and report only" mode worth building as a fallback if R-01 fires? | Yes — it is the re-scope target in §1.4.3 |
 | Q8 | **New in v3.0:** is Phase 5 (optimization) wanted at all, or is the MVP throughput tier good enough for one user? | Decide after Phase 4 with measured numbers in hand, not before (§16 Phase 5) |
 
