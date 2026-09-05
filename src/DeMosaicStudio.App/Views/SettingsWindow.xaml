@@ -102,7 +102,7 @@
                     <ComboBox ItemsSource="{x:Static vm:SettingsViewModel.Presets}"
                               SelectedItem="{Binding Preset}" Margin="0,0,0,4" />
                     <TextBlock Style="{StaticResource Hint}"
-                               Text="Fast: 격자를 지우고 부드럽게만 (모델 없음, 가장 빠름). Balanced: 초해상도 망으로 질감을 만들어 넣고 프레임 사이를 섞음 — 모든 화소가 추정입니다. Quality: 이웃 프레임에서 근거를 모으는 방식, 약 20배 느림." />
+                               Text="Fast (기본): 격자를 지우고 부드럽게만 — 모델 없음, 가장 빠름, 실측에서 가장 좋았습니다. Balanced: 초해상도 망으로 질감을 만들어 넣음 — 모든 화소가 추정이며, 지금까지의 영상에서는 Fast보다 나쁘게 측정됐습니다. Quality: 이웃 프레임에서 근거를 모음, 약 2.5배 느림." />
 
                     <TextBlock Style="{StaticResource Label}" Text="시간 창" />
                     <ComboBox ItemsSource="{x:Static vm:SettingsViewModel.TemporalWindows}"

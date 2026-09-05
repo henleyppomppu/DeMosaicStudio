@@ -1632,6 +1632,46 @@ A one-hour source: 67 hours this morning, **4.4 hours** on Fast at every frame, 
 detector on every second frame. Quality's 3.7× came entirely from the shared fixes — it does
 exactly what it did before, on the same masks minus their seams.
 
+### Then someone looked — and the default changed
+
+With the weights installed, `scripts/compare_presets.py` put the same frame through every preset
+and scored it against the clean picture (the quality fixture: a screen-fixed mosaic over a
+panning crop of Tears of Steel):
+
+| | PSNR dB | LPIPS (lower is better) |
+| --- | ---: | ---: |
+| input (mosaic) | 25.97 | 0.544 |
+| **Fast** | 28.17 | **0.115** |
+| Balanced (SR) | **20.95** | 0.167 |
+| Quality (evidence) | **30.11** | 0.211 |
+
+Balanced scored below the *mosaic* on PSNR and behind Fast on LPIPS, and the picture agreed: a
+hard bright blob with a dark halo where the clean frame is a soft one. Quality had the highest
+PSNR and the vertical streaking D-29 documented, which LPIPS charged it for.
+
+That could have been the content — the clean frame is itself out of focus — so the network was
+isolated on a *sharp* crop, box-decimated 4× (its native scale, a 64×64 input, the ideal case):
+
+| sharp crop, block 4 | luma PSNR | LPIPS |
+| --- | ---: | ---: |
+| bicubic | **45.2** | **0.070** |
+| SR, grey replicated to RGB | 32.7 | 0.188 |
+| SR, real RGB | 34.9 | — |
+
+A constant image passes through the network almost unchanged (0.1 → 0.101, 0.9 → 0.920) and
+fp16 equals fp32, so the weights and the in-house architecture are right; colour buys 2 dB and
+no more. **On clean box-decimated input this network is worse than bicubic on both metrics, on
+both blurry and sharp content.** The likeliest reason is what it was trained on: heavily
+degraded photographs, whose blur and noise it removes and whose textures it supplies — neither
+of which a clean decimation of CG footage has or wants. That is D-04's "confidently wrong
+texture" in a new form, wrong sharpness rather than wrong texture, and decimation did not
+remove it after all.
+
+**The default preset is Fast.** Balanced stays one click away, and a photographic source may yet
+be where the network earns its place — every clip this project owns is a Blender open movie
+(D-36's limitation applies here with full force). But a default is what was measured best, and
+that is Fast on the footage in hand.
+
 ### Settings and protocol
 
 Protocol 1.2. `detection.detectEvery` runs the detector on every Nth frame with the tracker

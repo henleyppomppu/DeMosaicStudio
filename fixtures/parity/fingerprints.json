@@ -14,7 +14,7 @@
           "detectEvery": 1
         },
         "restoration": {
-          "preset": "Balanced",
+          "preset": "Fast",
           "paddingRatio": 0.15,
           "temporalWindow": "auto",
           "alignConfMin": 0.35,
@@ -34,8 +34,8 @@
           "digest": "sha256:1517d424987199e4c748c62257ffc2492314bea2fe4a1db7407b04964e1222c3"
         },
         "restoration": {
-          "canonical": "alignConfMin=0.3500\nfeatherWidth=3\nminRestorationConfidence=0.0000\npaddingRatio=0.1500\npreset=Balanced\ntemporalAlpha=0.3000\ntemporalWindow=auto",
-          "digest": "sha256:3aad163167ed051d11e89e280d0173013c5bbbcc29d967823a333a19ede52426"
+          "canonical": "alignConfMin=0.3500\nfeatherWidth=3\nminRestorationConfidence=0.0000\npaddingRatio=0.1500\npreset=Fast\ntemporalAlpha=0.3000\ntemporalWindow=auto",
+          "digest": "sha256:77d2f89a3e4ff0203c635f010179640439c31db8b7e555cb20d8e7c362dc83ab"
         },
         "encode": {
           "canonical": "codec=H265\nconstantQuality=18\nprofile=QualityX265",

@@ -298,7 +298,8 @@ class JobRunner:
             raise WorkerError(E7006, "process requires an outputPath")
 
         settings = context.settings
-        preset = QualityPreset(_setting(settings, "restoration", "preset", default="Balanced"))
+        # Fast by default since D-43: measured best on the footage in hand (see the ADR).
+        preset = QualityPreset(_setting(settings, "restoration", "preset", default="Fast"))
         window_setting = _setting(settings, "restoration", "temporalWindow", default="auto")
         window_setting = None if window_setting in (None, "auto") else int(window_setting)
         min_region_area = int(_setting(settings, "detection", "minRegionArea", default=256))

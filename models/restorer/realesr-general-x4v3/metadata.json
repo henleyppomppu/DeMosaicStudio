@@ -1,0 +1,15 @@
+{
+  "id": "realesr-general-x4v3",
+  "version": "0.2.5.0",
+  "task": "single-image super-resolution x4 (decimated mosaic crops, luma)",
+  "sha256": "c54e56481f324e545e751142eecb1a2a611a42aa9e465cca5fd94a415b9edd16",
+  "architecture": {
+    "type": "SRVGGNetCompact",
+    "numFeat": 64,
+    "numConv": 32,
+    "upscale": 4
+  },
+  "source": "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesr-general-x4v3.pth",
+  "license": "BSD-3-Clause (Real-ESRGAN, Xintao Wang et al.)",
+  "notes": "Third-party weights used as-is on decimated input (D-43, revising D-04). General-purpose photographic prior; not a face model (prd.md 2.3 C-2, C-4)."
+}

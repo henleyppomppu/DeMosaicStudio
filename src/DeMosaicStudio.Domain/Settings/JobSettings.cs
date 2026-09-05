@@ -105,8 +105,12 @@ public sealed record DetectionSettings
 /// <summary>Settings that affect restoration. In the <c>restoration</c> fingerprint (prd.md §9.3).</summary>
 public sealed record RestorationSettings
 {
-    /// <summary>Quality preset. §15.</summary>
-    public QualityPreset Preset { get; init; } = QualityPreset.Balanced;
+    /// <summary>
+    /// Quality preset. §15. Default <see cref="QualityPreset.Fast"/> since D-43: measured on the
+    /// only footage available, the decimate-and-interpolate floor beat the super-resolution
+    /// network on both PSNR and LPIPS, and a default should be what was measured best.
+    /// </summary>
+    public QualityPreset Preset { get; init; } = QualityPreset.Fast;
 
     /// <summary>ROI padding ratio. Default 0.15, range 0.10-0.20 (§5.5.1).</summary>
     public double PaddingRatio { get; init; } = 0.15;

@@ -33,7 +33,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--seconds", type=float, default=40.0, help="run this long, then cancel")
     parser.add_argument("--mask", type=float, default=0.5)
     parser.add_argument("--min-area", type=int, default=1024)
-    parser.add_argument("--preset", default="Balanced")
+    parser.add_argument("--preset", default="Fast")
     parser.add_argument("--detect-every", type=int, default=1)
     parser.add_argument("--quiet", action="store_true", help="print only the summary line")
     args = parser.parse_args(argv)
