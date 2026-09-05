@@ -140,3 +140,25 @@ def _request(message_type: str, job_id: str, **payload: Any):
     from demosaic_worker.messages import parse_request
 
     return parse_request(_line(message_type, jobId=job_id, **payload))
+
+
+def test_optional_imports_are_warmed_before_the_loop_starts(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The deadlock fix: heavy native libraries load on the main thread before the reader thread
+    exists and before any job has native threads. Order is the whole point, so it is what is tested."""
+    from demosaic_worker import main_loop
+
+    order: list[str] = []
+    monkeypatch.setattr(main_loop, "warm_optional_imports", lambda: order.append("warm"))
+    monkeypatch.setattr(main_loop, "configure_stdio_utf8", lambda: order.append("stdio"))
+    monkeypatch.setattr(main_loop.Worker, "run", lambda self, stream=None: order.append("run") or 0)
+    monkeypatch.setattr(main_loop, "JobRunner", lambda: object())
+
+    assert main_loop.main() == 0
+    assert order == ["stdio", "warm", "run"]
+
+
+def test_a_missing_optional_library_is_skipped_not_fatal() -> None:
+    from demosaic_worker.main_loop import warm_optional_imports
+
+    loaded = warm_optional_imports(("json", "no_such_module_anywhere", "os"))
+    assert loaded == ["json", "os"]

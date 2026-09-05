@@ -1754,3 +1754,43 @@ model and optional LoRA/embeddings from the store, strength as the one exposed k
 0.2), no prompt field — rather than a fourth preset, because that is what it is. The model
 manager (a Hugging Face repo id in settings, fetched by the application with progress) is the
 larger part of that work and is not started until the user says so.
+
+### Phase 1, shipped (2026-09-06)
+
+The refiner is in the worker (`restore/refine.py`) as a pass between the single-frame restorer
+and the temporal blend, protocol 1.3 (`restoration.refine`), a 다듬기 tab in the settings dialog,
+and **folders instead of a downloader**: the user makes `models/diffusion/<name>/`,
+`models/lora/`, `models/embeddings/`, drops files in, and the dialog lists what it finds
+(`FolderModelStore`; the rules for what counts are pure and tested in `ModelStoreRules`). No
+Hugging Face client in the application, no token handling, no progress protocol — a folder
+listing is the whole model manager, and it is the one the user asked for.
+
+Three details worth knowing:
+
+- **Luma in, luma out.** The pipeline is luma-only (D-24). The region is rebuilt as RGB from the
+  restored luma and the frame's own chroma for the model's benefit, and only
+  `luma(refined) − luma(input)` under one matrix comes back, so a matrix mismatch with PyAV's
+  cannot shift the region's brightness. `test_refine.py` pins this with a pipe that adds a
+  constant.
+- **A refiner that cannot load degrades the job, once.** Missing model, missing `diffusers`,
+  bad weights: one W6101, the job finishes unrefined, `regionsRefined` says 0. Not E4001 to the
+  job — the restoration underneath is complete without it.
+- **The fingerprint guard learned about nested records.** `Every_fingerprinted_setting_appears`
+  now walks into `RefineSettings` and expects `refine.strength` etc.; `refine.embeddings` is the
+  sorted, `;`-joined list on both sides, and a 1.2 host that never sends `refine` fingerprints as
+  "off" rather than failing. The parity fixture gained a `refine-on` case.
+
+**Measured through the real worker** (`bench_throughput.py --refine`, 1080p, Fast + refiner,
+SD1.5 + LCM-LoRA at strength 0.2, 8 steps): **0.87 fps**, 262 ms per region over 119 regions —
+against 4.25 fps unrefined. A one-hour source is about 21 hours with the refiner on. It is a
+choice, off by default.
+
+**And the scipy deadlock came back, through diffusers.** Trial 1 of `refine_stack.py` hung on the
+first refined frame with the main thread inside `create_module` for `scipy/linalg/blas.py` —
+scipy imported lazily by diffusers at pipeline load, *inside the running job*, with the decoder's
+and x265's thread pools alive. A six-way bisect (torch, CUDA, the reader thread, the import, in
+every combination, no job) reproduced nothing; a running job is the missing ingredient. The fix
+is `warm_optional_imports()` at worker start, on the main thread, before the reader thread and
+before any job: scipy, diffusers, transformers and peft load then, and the same job runs to
+completion. Cost: worker start-up 2 → 6 s when diffusers is installed. The guard test pins the
+*order* (stdio → warm → run), because the order is the fix.

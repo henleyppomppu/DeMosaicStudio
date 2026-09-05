@@ -58,6 +58,7 @@ from .post.blend import TemporalAlpha, blend_region
 from .protocol import Stage
 from .roi import build_roi
 from .restore.accumulator import EvidenceAccumulator
+from .restore.refine import DiffusionRefiner, RefineSettings, RefineStats, chroma_for
 from .restore.temporal import DEFAULT_ALPHA, TemporalSmoother
 from .restore.upscale import RESTORER_ID, Upscaler, bicubic_restore
 from .scene.cuts import SceneChange, classify_pair, same_scene_span
@@ -354,6 +355,14 @@ class JobRunner:
         # region found one frame late costs nothing the pipeline was not already spending.
         detect_every = max(1, int(_setting(settings, "detection", "detectEvery", default=1)))
 
+        # D-44: an optional diffusion pass over each restored region, at low strength, with the
+        # user's own model from the store. Off by default; costs nothing when off. The pipeline
+        # loads on first use, and a load failure downgrades the job to unrefined with W6101 once
+        # rather than failing it - the restoration underneath is complete without it.
+        refine_settings = RefineSettings.from_settings(settings)
+        refiner = DiffusionRefiner(MODELS, refine_settings) if refine_settings.enabled else None
+        refine_stats = RefineStats()
+
         emitter.progress(context.job_id, Stage.PROBING, 0.0, force=True)
         info = probe_media(source)
         total = int((info.duration_seconds or 0) * float(info.nominal_fps or 24)) or None
@@ -544,6 +553,10 @@ class JobRunner:
                 outcomes = self._restore_single_frame(
                     restorable,
                     luma=luma,
+                    planes=planes,
+                    plane_height=plane_height,
+                    refiner=refiner,
+                    refine_stats=refine_stats,
                     backend=backend,
                     temporal=temporal,
                     frame_index=index,
@@ -702,6 +715,14 @@ class JobRunner:
         summary["frameCountPreserved"] = timeline.frame_count_preserved
         summary["timeline"] = timeline.describe()
         summary["regionsGated"] = gate.gated_track_count
+        summary["regionsRefined"] = refine_stats.regions
+        if refine_stats.regions:
+            emitter.log(
+                "info",
+                "diffusion refiner: %d regions, %.0f ms each" % (
+                    refine_stats.regions, 1000 * refine_stats.seconds / refine_stats.regions),
+                model=refine_settings.model, strength=refine_settings.strength,
+            )
 
         if gate.gated_track_count:
             emitter.warn(
@@ -979,6 +1000,10 @@ class JobRunner:
         tracks: list[Track],
         *,
         luma: np.ndarray,
+        planes: np.ndarray,
+        plane_height: int,
+        refiner: DiffusionRefiner | None,
+        refine_stats: RefineStats,
         backend: Any,
         temporal: TemporalSmoother,
         frame_index: int,
@@ -1075,6 +1100,28 @@ class JobRunner:
                     route(RouteInputs(degradation_chain_exhausted=True)), None, confidence, roi, profile
                 )))
             return outcomes
+
+        # The diffusion pass sits between the restorer and the temporal blend: it refines what
+        # this frame produced, and the blend then damps what it invented differently from the
+        # last frame. Chroma comes from the frame; only the luma change comes back.
+        if refiner is not None and refiner.available:
+            refined: list[np.ndarray] = []
+            for (_, _, _, roi, _, _), pixels in zip(to_restore, restored):
+                started_refine = time.time()
+                try:
+                    u, v = chroma_for(planes, plane_height, roi.crop_bounds)
+                    refined.append(refiner.refine_luma(pixels, u, v))
+                    refine_stats.regions += 1
+                    refine_stats.seconds += time.time() - started_refine
+                except WorkerError as error:
+                    if not refine_stats.warned:
+                        emitter.warn(W6101, f"diffusion refiner unavailable ({error}); regions left unrefined")
+                        refine_stats.warned = True
+                    refined.append(pixels)
+                except Exception as exc:  # noqa: BLE001 - one region failing is not the job failing
+                    emitter.warn(E4002, f"refiner failed on frame {frame_index}: {exc}")
+                    refined.append(pixels)
+            restored = refined
 
         for (track, _, profile, roi, decision, confidence), pixels, crop in zip(
             to_restore, restored, crops

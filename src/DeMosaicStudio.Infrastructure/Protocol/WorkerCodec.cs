@@ -245,6 +245,17 @@ public static class WorkerCodec
             ["minRestorationConfidence"] = settings.Restoration.MinRestorationConfidence,
             ["featherWidth"] = settings.Restoration.FeatherWidth,
             ["temporalAlpha"] = settings.Restoration.TemporalAlpha,
+            ["refine"] = new JsonObject
+            {
+                ["enabled"] = settings.Restoration.Refine.Enabled,
+                ["strength"] = settings.Restoration.Refine.Strength,
+                ["model"] = settings.Restoration.Refine.Model,
+                ["lora"] = string.IsNullOrEmpty(settings.Restoration.Refine.Lora) ? null : settings.Restoration.Refine.Lora,
+                ["embeddings"] = new JsonArray(
+                    settings.Restoration.Refine.Embeddings.Select(e => (JsonNode?)JsonValue.Create(e)).ToArray()),
+                ["steps"] = settings.Restoration.Refine.Steps,
+                ["seed"] = settings.Restoration.Refine.Seed,
+            },
         },
         ["encode"] = new JsonObject
         {

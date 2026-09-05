@@ -21,6 +21,13 @@ namespace DeMosaicStudio.App.ViewModels;
 public sealed class SettingsViewModel : INotifyPropertyChanged
 {
     private readonly JobSettings _original;
+    private readonly IModelStore _store;
+
+    private bool _refineEnabled;
+    private double _refineStrength;
+    private string _refineModel = string.Empty;
+    private string _refineLora = string.Empty;
+    private int _refineSteps;
 
     private double _confidence;
     private double _maskThreshold;
@@ -38,13 +45,74 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     private EncoderProfile _profile;
     private int _constantQuality;
 
-    /// <summary>Creates an editable copy of the given settings.</summary>
-    public SettingsViewModel(JobSettings settings)
+    /// <summary>Creates an editable copy of the given settings, listing what the store offers.</summary>
+    public SettingsViewModel(JobSettings settings, IModelStore store)
     {
         ArgumentNullException.ThrowIfNull(settings);
+        ArgumentNullException.ThrowIfNull(store);
 
         _original = settings;
+        _store = store;
+
+        // "(none)" is the empty string in the settings; the dialog needs a row to click.
+        DiffusionModels = [NONE, .. store.DiffusionModels()];
+        Loras = [NONE, .. store.Loras()];
+        EmbeddingChoices = store.Embeddings()
+            .Select(name => new EmbeddingChoice(name, settings.Restoration.Refine.Embeddings.Contains(name)))
+            .ToList();
+        StoreRoot = store.Root;
+
         Reset(settings);
+    }
+
+    /// <summary>The row that stands for "nothing chosen".</summary>
+    public const string NONE = "(없음)";
+
+    /// <summary>Where the user puts files, shown in the dialog.</summary>
+    public string StoreRoot { get; }
+
+    /// <summary>What is in <c>models/diffusion</c>, with a "(none)" row first.</summary>
+    public IReadOnlyList<string> DiffusionModels { get; }
+
+    /// <summary>What is in <c>models/lora</c>, with a "(none)" row first.</summary>
+    public IReadOnlyList<string> Loras { get; }
+
+    /// <summary>What is in <c>models/embeddings</c>, each with a checkbox.</summary>
+    public IReadOnlyList<EmbeddingChoice> EmbeddingChoices { get; }
+
+    /// <summary>Whether the diffusion pass runs (D-44).</summary>
+    public bool RefineEnabled
+    {
+        get => _refineEnabled;
+        set => Set(ref _refineEnabled, value);
+    }
+
+    /// <summary>Refiner strength (D-44).</summary>
+    public double RefineStrength
+    {
+        get => _refineStrength;
+        set => Set(ref _refineStrength, value);
+    }
+
+    /// <summary>Chosen diffusion model, or <see cref="NONE"/>.</summary>
+    public string RefineModel
+    {
+        get => _refineModel;
+        set => Set(ref _refineModel, value);
+    }
+
+    /// <summary>Chosen LoRA, or <see cref="NONE"/>.</summary>
+    public string RefineLora
+    {
+        get => _refineLora;
+        set => Set(ref _refineLora, value);
+    }
+
+    /// <summary>Refiner steps (D-44).</summary>
+    public int RefineSteps
+    {
+        get => _refineSteps;
+        set => Set(ref _refineSteps, value);
     }
 
     /// <inheritdoc />
@@ -213,6 +281,15 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             MinRestorationConfidence = MinRestorationConfidence,
             FeatherWidth = FeatherWidth,
             TemporalAlpha = TemporalAlpha,
+            Refine = _original.Restoration.Refine with
+            {
+                Enabled = RefineEnabled,
+                Strength = RefineStrength,
+                Model = RefineModel == NONE ? string.Empty : RefineModel,
+                Lora = RefineLora == NONE ? string.Empty : RefineLora,
+                Embeddings = EmbeddingChoices.Where(c => c.IsChecked).Select(c => c.Name).ToList(),
+                Steps = RefineSteps,
+            },
         },
         Encode = _original.Encode with
         {
@@ -241,6 +318,16 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         Profile = settings.Encode.Profile;
         Codec = settings.Encode.Codec;
         ConstantQuality = settings.Encode.ConstantQuality;
+
+        RefineEnabled = settings.Restoration.Refine.Enabled;
+        RefineStrength = settings.Restoration.Refine.Strength;
+        RefineModel = string.IsNullOrEmpty(settings.Restoration.Refine.Model) ? NONE : settings.Restoration.Refine.Model;
+        RefineLora = string.IsNullOrEmpty(settings.Restoration.Refine.Lora) ? NONE : settings.Restoration.Refine.Lora;
+        RefineSteps = settings.Restoration.Refine.Steps;
+        foreach (var choice in EmbeddingChoices)
+        {
+            choice.IsChecked = settings.Restoration.Refine.Embeddings.Contains(choice.Name);
+        }
     }
 
     private void Set<T>(ref T field, T value, [CallerMemberName] string? name = null)
@@ -252,5 +339,31 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
 
         field = value;
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+    }
+}
+
+/// <summary>One embedding file and whether it is selected.</summary>
+public sealed class EmbeddingChoice(string name, bool isChecked) : INotifyPropertyChanged
+{
+    private bool _isChecked = isChecked;
+
+    /// <inheritdoc />
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    /// <summary>The file name without extension.</summary>
+    public string Name { get; } = name;
+
+    /// <summary>Whether it is selected.</summary>
+    public bool IsChecked
+    {
+        get => _isChecked;
+        set
+        {
+            if (_isChecked != value)
+            {
+                _isChecked = value;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsChecked)));
+            }
+        }
     }
 }

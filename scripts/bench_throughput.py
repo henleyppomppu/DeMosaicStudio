@@ -35,6 +35,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--min-area", type=int, default=1024)
     parser.add_argument("--preset", default="Fast")
     parser.add_argument("--detect-every", type=int, default=1)
+    parser.add_argument("--refine", default=None, help="diffusion model name under models/diffusion (D-44)")
+    parser.add_argument("--lora", default=None, help="LoRA name under models/lora")
+    parser.add_argument("--strength", type=float, default=0.2)
     parser.add_argument("--quiet", action="store_true", help="print only the summary line")
     args = parser.parse_args(argv)
 
@@ -46,8 +49,8 @@ def main(argv: list[str] | None = None) -> int:
         rate = float(stream.average_rate or 24)
         print("source   : %dx%d  %.1f s  %.2f fps  -> about %d frames"
               % (stream.width, stream.height, duration, rate, duration * rate))
-    print("settings : preset=%s mask=%.2f minArea=%d detectEvery=%d"
-          % (args.preset, args.mask, args.min_area, args.detect_every))
+    print("settings : preset=%s mask=%.2f minArea=%d detectEvery=%d refine=%s"
+          % (args.preset, args.mask, args.min_area, args.detect_every, args.refine or "off"))
 
     output = Path(REPO / "artifacts" / "bench" / "throughput.mp4")
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -62,15 +65,17 @@ def main(argv: list[str] | None = None) -> int:
     assert process.stdin and process.stdout
 
     def send(**message: object) -> None:
-        process.stdin.write(json.dumps({"v": "1.2", "id": "bench", **message}) + "\n")
+        process.stdin.write(json.dumps({"v": "1.3", "id": "bench", **message}) + "\n")
         process.stdin.flush()
 
-    send(type="hello", hostVersion="1.0", protocolVersion="1.2")
+    send(type="hello", hostVersion="1.0", protocolVersion="1.3")
     send(type="process", jobId="bench", sourcePath=str(args.clip), outputPath=str(output),
          settings={
              "detection": {"confidence": 0.45, "maskThreshold": args.mask,
                            "minRegionArea": args.min_area, "detectEvery": args.detect_every},
-             "restoration": {"preset": args.preset, "temporalWindow": "auto"},
+             "restoration": {"preset": args.preset, "temporalWindow": "auto",
+                             "refine": {"enabled": bool(args.refine), "model": args.refine or "",
+                                        "lora": args.lora, "strength": args.strength, "steps": 8, "seed": 7}},
              "encode": {"codec": "H265", "constantQuality": 18, "preset": "medium"},
          })
 
@@ -96,9 +101,11 @@ def main(argv: list[str] | None = None) -> int:
                          message.get("fps"), message.get("eta")), flush=True)
         elif message["type"] == "log" and message.get("level") == "warning" and not args.quiet:
             print("  warn: %s" % message.get("message"), flush=True)
+        elif message["type"] == "log" and "refiner" in str(message.get("message", "")) and not args.quiet:
+            print("  log: %s" % message.get("message"), flush=True)
         elif message["type"] == "result":
-            print("RESULT %s after %.1fs   last fps=%s"
-                  % (message["status"], elapsed, last_fps))
+            print("RESULT %s after %.1fs   last fps=%s   regionsRefined=%s"
+                  % (message["status"], elapsed, last_fps, (message.get("summary") or {}).get("regionsRefined")))
             send(type="shutdown")
             process.wait(timeout=30)
             output.unlink(missing_ok=True)

@@ -1,5 +1,6 @@
 using System.Windows;
 using DeMosaicStudio.App.ViewModels;
+using DeMosaicStudio.Application.Settings;
 using DeMosaicStudio.Domain.Settings;
 
 namespace DeMosaicStudio.App.Views;
@@ -14,10 +15,10 @@ namespace DeMosaicStudio.App.Views;
 public partial class SettingsWindow : Window
 {
     /// <summary>Creates the dialog over an editable copy of the given settings.</summary>
-    public SettingsWindow(JobSettings settings)
+    public SettingsWindow(JobSettings settings, IModelStore store)
     {
         InitializeComponent();
-        Model = new SettingsViewModel(settings);
+        Model = new SettingsViewModel(settings, store);
         DataContext = Model;
     }
 

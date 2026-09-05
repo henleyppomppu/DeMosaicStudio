@@ -48,6 +48,16 @@ _FIELDS: Final[dict[Scope, tuple[tuple[str, str], ...]]] = {
         ("minRestorationConfidence", "num"),
         ("paddingRatio", "num"),
         ("preset", "str"),
+        # The diffusion refiner (D-44). Nested under `refine` in the settings object; flattened
+        # here so the canonical form stays one key=value per line in both languages. A model or
+        # LoRA that changes changes every restored pixel, so all of these are fingerprinted.
+        ("refine.enabled", "bool"),
+        ("refine.embeddings", "list"),
+        ("refine.lora", "str"),
+        ("refine.model", "str"),
+        ("refine.seed", "int"),
+        ("refine.steps", "int"),
+        ("refine.strength", "num"),
         # The blend weight of the single-frame path's temporal smoother (D-43).
         ("temporalAlpha", "num"),
         # The *requested* value, never the per-frame resolved K (§5.6.1, §9.3).
@@ -61,6 +71,12 @@ _FIELDS: Final[dict[Scope, tuple[tuple[str, str], ...]]] = {
 }
 
 
+#: What an absent `restoration.refine` key means, matching RefineSettings' defaults.
+_REFINE_DEFAULTS: Final[dict[str, Any]] = {
+    "enabled": False, "embeddings": [], "lora": "", "model": "", "seed": 7, "steps": 8, "strength": 0.2,
+}
+
+
 def _render(value: Any, kind: str) -> str:
     if kind == "num":
         # Four decimals so C# "0.0000" and Python f"{v:.4f}" agree without either language's
@@ -68,7 +84,12 @@ def _render(value: Any, kind: str) -> str:
         return f"{float(value):.4f}"
     if kind == "int":
         return str(int(value))
-    return str(value)
+    if kind == "bool":
+        return "true" if value else "false"
+    if kind == "list":
+        # Sorted and joined: order in the settings file is not a difference in the output.
+        return ";".join(sorted(str(v) for v in (value or [])))
+    return "" if value is None else str(value)
 
 
 def canonicalize(settings: Mapping[str, Any], scope: Scope) -> str:
@@ -80,9 +101,18 @@ def canonicalize(settings: Mapping[str, Any], scope: Scope) -> str:
     lines = []
 
     for key, kind in _FIELDS[scope]:
-        if key not in section:
-            raise KeyError(f"settings[{scope.value!r}] is missing {key!r} (prd.md §9.3)")
-        lines.append(f"{key}={_render(section[key], kind)}")
+        # A dotted key reads a nested object: "refine.model" is settings[scope]["refine"]["model"].
+        # Missing nested keys fall back to the defaults the worker itself uses, so a 1.2 host that
+        # never sends `refine` still fingerprints - as "off" - rather than failing.
+        if "." in key:
+            outer, inner = key.split(".", 1)
+            nested = section.get(outer) or {}
+            value = nested.get(inner, _REFINE_DEFAULTS[inner])
+        else:
+            if key not in section:
+                raise KeyError(f"settings[{scope.value!r}] is missing {key!r} (prd.md §9.3)")
+            value = section[key]
+        lines.append(f"{key}={_render(value, kind)}")
 
     # Ordinal sort, matching StringComparer.Ordinal on the host side.
     lines.sort()

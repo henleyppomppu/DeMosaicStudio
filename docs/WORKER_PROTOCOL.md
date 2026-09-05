@@ -66,6 +66,7 @@ Changing the protocol follows `AGENTS.md`: bump the version → change both side
 | 1.0 | first specification |
 | 1.1 | `stderr` no longer carries protocol; `probeResult` gains `hardware` |
 | 1.2 | two `settings` keys and a meaning for `preset` (D-43): `detection.detectEvery` (int, default 1) runs the detector on every Nth frame with the tracker carrying regions between; `restoration.temporalAlpha` (number, default 0.3) is the new-frame weight of the single-frame path's temporal blend. `restoration.preset` now selects the restorer — `Fast` decimate + bicubic, `Balanced` decimate + compact super-resolution network + temporal blend (falls back to `Fast` with `W6101` when the network is not installed), `Quality` the evidence accumulator. Both new keys are in the settings fingerprint (§9.3), so a 1.1 host's cached detections and restorations are invalidated once |
+| 1.3 | `restoration.refine` object (D-44): `enabled`, `strength`, `model`, `lora` (null for none), `embeddings[]`, `steps`, `seed`. An optional image-to-image diffusion pass over each restored region, with the user's own model from `models/diffusion`, `models/lora`, `models/embeddings` chosen by name. No prompt field exists (§2.3 C-4). Fingerprinted under `refine.*` keys with an absent object reading as off. The `result` summary gains `regionsRefined` |
 
 ## Messages
 

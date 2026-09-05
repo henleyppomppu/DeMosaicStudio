@@ -8,3 +8,10 @@ av==14.0.1
 numpy==2.2.1
 pillow==12.3.0
 pytest==8.3.4
+# Diffusion refiner (D-44). Optional at runtime: the worker warns W6101 and skips refining if absent.
+diffusers==0.40.0
+transformers==5.16.1
+accelerate==1.14.0
+peft==0.20.0
+safetensors==0.8.0
+huggingface_hub==1.30.0

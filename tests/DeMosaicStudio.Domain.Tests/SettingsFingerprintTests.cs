@@ -199,6 +199,24 @@ public sealed class SettingsFingerprintTests
 
         foreach (var property in settingsType.GetProperties())
         {
+            // A nested settings record (RefineSettings under RestorationSettings, D-44) is
+            // fingerprinted member by member under a dotted prefix: "refine.strength". Each of
+            // its members must appear; the container itself is not a key.
+            if (property.PropertyType.Namespace == typeof(JobSettings).Namespace
+                && property.PropertyType.IsClass && property.PropertyType != typeof(string))
+            {
+                foreach (var nested in property.PropertyType.GetProperties())
+                {
+                    var key = $"{property.Name}.{nested.Name}";
+                    Assert.True(
+                        keys.Contains(key),
+                        $"{settingsType.Name}.{key} is not in the {scope} fingerprint. "
+                        + "Add it under the dotted prefix, or record why it is excluded (prd.md §9.3, §5.16.10).");
+                }
+
+                continue;
+            }
+
             Assert.True(
                 keys.Contains(property.Name),
                 $"{settingsType.Name}.{property.Name} is not in the {scope} fingerprint. "

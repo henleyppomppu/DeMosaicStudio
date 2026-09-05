@@ -110,7 +110,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        var dialog = new SettingsWindow(viewModel.Settings) { Owner = this };
+        var dialog = new SettingsWindow(viewModel.Settings, viewModel.ModelStore) { Owner = this };
         if (dialog.ShowDialog() == true)
         {
             viewModel.Apply(dialog.Model.ToSettings());

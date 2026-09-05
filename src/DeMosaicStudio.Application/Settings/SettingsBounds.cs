@@ -61,6 +61,12 @@ public static class SettingsBounds
     /// <summary>Temporal blend weight of the single-frame path (D-43). 1 is no blending.</summary>
     public static Bound TemporalAlpha { get; } = new(0.0, 1.0, 0.3);
 
+    /// <summary>Diffusion refiner strength (D-44). 0.2 measured best; above 0.3 it invents.</summary>
+    public static Bound RefineStrength { get; } = new(0.0, 1.0, 0.2);
+
+    /// <summary>Diffusion refiner steps (D-44). With an LCM LoRA the useful range is 4-8.</summary>
+    public static Bound RefineSteps { get; } = new(1, 16, 8);
+
     /// <summary>Constant-quality target.</summary>
     public static Bound ConstantQuality { get; } = new(0, 51, 18);
 
@@ -93,6 +99,14 @@ public static class SettingsBounds
                     MinRestorationConfidence.Clamp(settings.Restoration.MinRestorationConfidence),
                 FeatherWidth = FeatherWidth.ClampInt(settings.Restoration.FeatherWidth),
                 TemporalAlpha = TemporalAlpha.Clamp(settings.Restoration.TemporalAlpha),
+                Refine = settings.Restoration.Refine with
+                {
+                    Strength = RefineStrength.Clamp(settings.Restoration.Refine.Strength),
+                    Steps = RefineSteps.ClampInt(settings.Restoration.Refine.Steps),
+                    Model = settings.Restoration.Refine.Model ?? string.Empty,
+                    Lora = settings.Restoration.Refine.Lora ?? string.Empty,
+                    Embeddings = settings.Restoration.Refine.Embeddings ?? [],
+                },
             },
             Encode = settings.Encode with
             {

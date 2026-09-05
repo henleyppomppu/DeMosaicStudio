@@ -20,7 +20,16 @@
           "alignConfMin": 0.35,
           "minRestorationConfidence": 0.0,
           "featherWidth": 3,
-          "temporalAlpha": 0.3
+          "temporalAlpha": 0.3,
+          "refine": {
+            "enabled": false,
+            "strength": 0.2,
+            "model": "",
+            "lora": null,
+            "embeddings": [],
+            "steps": 8,
+            "seed": 7
+          }
         },
         "encode": {
           "profile": "QualityX265",
@@ -34,8 +43,62 @@
           "digest": "sha256:1517d424987199e4c748c62257ffc2492314bea2fe4a1db7407b04964e1222c3"
         },
         "restoration": {
-          "canonical": "alignConfMin=0.3500\nfeatherWidth=3\nminRestorationConfidence=0.0000\npaddingRatio=0.1500\npreset=Fast\ntemporalAlpha=0.3000\ntemporalWindow=auto",
-          "digest": "sha256:77d2f89a3e4ff0203c635f010179640439c31db8b7e555cb20d8e7c362dc83ab"
+          "canonical": "alignConfMin=0.3500\nfeatherWidth=3\nminRestorationConfidence=0.0000\npaddingRatio=0.1500\npreset=Fast\nrefine.embeddings=\nrefine.enabled=false\nrefine.lora=\nrefine.model=\nrefine.seed=7\nrefine.steps=8\nrefine.strength=0.2000\ntemporalAlpha=0.3000\ntemporalWindow=auto",
+          "digest": "sha256:dee709b0fa0556d97c4e302903a7f842b0e02a2e743537ea303e2f7b385a0241"
+        },
+        "encode": {
+          "canonical": "codec=H265\nconstantQuality=18\nprofile=QualityX265",
+          "digest": "sha256:192c660a6c0367327e2fea4e7c48b6baabc0041cb41aed715c6302332f9d7273"
+        }
+      }
+    },
+    {
+      "name": "refine-on",
+      "settings": {
+        "detection": {
+          "confidence": 0.45,
+          "nmsIou": 0.5,
+          "minRegionArea": 256,
+          "maskThreshold": 0.5,
+          "minConfirmFrames": 2,
+          "maxMissingFrames": 3,
+          "detectEvery": 1
+        },
+        "restoration": {
+          "preset": "Fast",
+          "paddingRatio": 0.15,
+          "temporalWindow": "auto",
+          "alignConfMin": 0.35,
+          "minRestorationConfidence": 0.0,
+          "featherWidth": 3,
+          "temporalAlpha": 0.3,
+          "refine": {
+            "enabled": true,
+            "strength": 0.2,
+            "model": "stable-diffusion-v1-5",
+            "lora": "lcm-lora-sdv1-5",
+            "embeddings": [
+              "zebra",
+              "apple"
+            ],
+            "steps": 8,
+            "seed": 7
+          }
+        },
+        "encode": {
+          "profile": "QualityX265",
+          "codec": "H265",
+          "constantQuality": 18
+        }
+      },
+      "expected": {
+        "detection": {
+          "canonical": "confidence=0.4500\ndetectEvery=1\nmaskThreshold=0.5000\nmaxMissingFrames=3\nminConfirmFrames=2\nminRegionArea=256\nnmsIou=0.5000",
+          "digest": "sha256:1517d424987199e4c748c62257ffc2492314bea2fe4a1db7407b04964e1222c3"
+        },
+        "restoration": {
+          "canonical": "alignConfMin=0.3500\nfeatherWidth=3\nminRestorationConfidence=0.0000\npaddingRatio=0.1500\npreset=Fast\nrefine.embeddings=apple;zebra\nrefine.enabled=true\nrefine.lora=lcm-lora-sdv1-5\nrefine.model=stable-diffusion-v1-5\nrefine.seed=7\nrefine.steps=8\nrefine.strength=0.2000\ntemporalAlpha=0.3000\ntemporalWindow=auto",
+          "digest": "sha256:0e5590fe214612640f690d31dd8b14f5d892e667fa3ce1e96471bfd3592dfcdd"
         },
         "encode": {
           "canonical": "codec=H265\nconstantQuality=18\nprofile=QualityX265",

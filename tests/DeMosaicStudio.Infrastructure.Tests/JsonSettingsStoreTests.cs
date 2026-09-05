@@ -41,6 +41,11 @@ public sealed class JsonSettingsStoreTests : IDisposable
                 TemporalWindow = TemporalWindowSetting.Fixed(7),
                 MinRestorationConfidence = 0.88,
                 FeatherWidth = 5,
+                Refine = new RefineSettings
+                {
+                    Enabled = true, Strength = 0.25, Model = "sd15", Lora = "lcm",
+                    Embeddings = ["zebra", "apple"], Steps = 6,
+                },
             },
             Encode = new EncodeSettings
             {
@@ -60,7 +65,14 @@ public sealed class JsonSettingsStoreTests : IDisposable
         // explicitly never fingerprinted), and widening it here would be a Domain change made to
         // suit a test.
         Assert.Equal(settings.Detection, loaded.Detection);
-        Assert.Equal(settings.Restoration, loaded.Restoration);
+        // Refine carries a list (same reference-equality caveat), so it is compared member-wise.
+        Assert.Equal(settings.Restoration with { Refine = new() }, loaded.Restoration with { Refine = new() });
+        Assert.Equal(settings.Restoration.Refine.Enabled, loaded.Restoration.Refine.Enabled);
+        Assert.Equal(settings.Restoration.Refine.Strength, loaded.Restoration.Refine.Strength);
+        Assert.Equal(settings.Restoration.Refine.Model, loaded.Restoration.Refine.Model);
+        Assert.Equal(settings.Restoration.Refine.Lora, loaded.Restoration.Refine.Lora);
+        Assert.Equal(settings.Restoration.Refine.Embeddings, loaded.Restoration.Refine.Embeddings);
+        Assert.Equal(settings.Restoration.Refine.Steps, loaded.Restoration.Refine.Steps);
         Assert.Equal(settings.Encode, loaded.Encode);
         Assert.Equal(settings.Performance, loaded.Performance);
     }

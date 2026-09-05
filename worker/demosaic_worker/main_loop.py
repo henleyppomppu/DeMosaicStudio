@@ -221,9 +221,41 @@ class Worker:
             inbox.put(None)
 
 
+#: Libraries whose native extensions must be loaded before any job runs. Absent ones are skipped.
+OPTIONAL_HEAVY_IMPORTS: tuple[str, ...] = ("scipy.linalg", "scipy.ndimage", "diffusers", "transformers", "peft")
+
+
+def warm_optional_imports(names: tuple[str, ...] = OPTIONAL_HEAVY_IMPORTS) -> list[str]:
+    """Imports the optional heavy libraries now, on the main thread, before anything else exists.
+
+    **This is a deadlock fix, not a start-up optimisation.** Loading scipy's BLAS extension
+    *during a job* - with the decoder's and x265's thread pools alive and the stdin reader thread
+    (D-37) blocked - hung the worker on the first frame, every time, with the main thread inside
+    ``create_module`` for a scipy DLL. It happened first when scipy was used for labelling (D-43,
+    scipy removed) and again when diffusers imported scipy lazily at pipeline load (D-44). Nothing
+    reproduced it outside a running job: torch, CUDA, the reader thread and the import in every
+    combination were fine. Loaded here, before the reader thread starts and before any job has
+    native threads, the same imports are fine too - measured, the job runs to completion.
+
+    Returns the names that loaded. A missing library is not an error: the refiner reports W6101
+    on its own when asked to run without one.
+    """
+    import importlib
+
+    loaded: list[str] = []
+    for name in names:
+        try:
+            importlib.import_module(name)
+        except Exception:  # noqa: BLE001 - optional means optional
+            continue
+        loaded.append(name)
+    return loaded
+
+
 def main(argv: list[str] | None = None) -> int:
     """Process entry point."""
     configure_stdio_utf8()
+    warm_optional_imports()
 
     emitter = Emitter()
     worker = Worker(emitter=emitter, runner=JobRunner())

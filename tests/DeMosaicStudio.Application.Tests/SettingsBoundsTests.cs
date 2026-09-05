@@ -23,6 +23,8 @@ public sealed class SettingsBoundsTests
         { nameof(SettingsBounds.MaxMissingFrames), SettingsBounds.MaxMissingFrames },
         { nameof(SettingsBounds.DetectEvery), SettingsBounds.DetectEvery },
         { nameof(SettingsBounds.TemporalAlpha), SettingsBounds.TemporalAlpha },
+        { nameof(SettingsBounds.RefineStrength), SettingsBounds.RefineStrength },
+        { nameof(SettingsBounds.RefineSteps), SettingsBounds.RefineSteps },
         { nameof(SettingsBounds.PaddingRatio), SettingsBounds.PaddingRatio },
         { nameof(SettingsBounds.AlignConfMin), SettingsBounds.AlignConfMin },
         { nameof(SettingsBounds.MinRestorationConfidence), SettingsBounds.MinRestorationConfidence },
@@ -52,6 +54,8 @@ public sealed class SettingsBoundsTests
         Assert.Equal(SettingsBounds.MaxMissingFrames.Default, shipped.Detection.MaxMissingFrames);
         Assert.Equal(SettingsBounds.DetectEvery.Default, shipped.Detection.DetectEvery);
         Assert.Equal(SettingsBounds.TemporalAlpha.Default, shipped.Restoration.TemporalAlpha);
+        Assert.Equal(SettingsBounds.RefineStrength.Default, shipped.Restoration.Refine.Strength);
+        Assert.Equal(SettingsBounds.RefineSteps.Default, shipped.Restoration.Refine.Steps);
         Assert.Equal(SettingsBounds.PaddingRatio.Default, shipped.Restoration.PaddingRatio);
         Assert.Equal(SettingsBounds.AlignConfMin.Default, shipped.Restoration.AlignConfMin);
         Assert.Equal(

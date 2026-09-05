@@ -26,9 +26,13 @@ public partial class App : System.Windows.Application, IDisposable
         // a desktop application that vanishes tells the user nothing about why.
         DispatcherUnhandledException += OnUnhandled;
 
-        _engine = new WorkerProcessEngine(Locate());
+        var location = Locate();
+        _engine = new WorkerProcessEngine(location);
 
-        var viewModel = new MainViewModel(_engine, Dispatcher, JsonSettingsStore.Default());
+        // The model folders sit beside the worker, under the same home the worker resolves
+        // MODELS from, so the names the dialog lists are the names the worker will find.
+        var models = new FolderModelStore(Path.Combine(location.WorkingDirectory ?? AppContext.BaseDirectory, "models"));
+        var viewModel = new MainViewModel(_engine, Dispatcher, JsonSettingsStore.Default(), models);
         var window = new MainWindow { DataContext = viewModel };
 
         MainWindow = window;

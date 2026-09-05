@@ -102,9 +102,48 @@ public sealed record DetectionSettings
     public int DetectEvery { get; init; } = 1;
 }
 
+/// <summary>
+/// The optional diffusion pass over each restored region (D-44). In the <c>restoration</c>
+/// fingerprint: a different model, LoRA or strength changes every restored pixel.
+/// </summary>
+/// <remarks>
+/// The models are not part of the product. The user places them in <c>models/diffusion</c>,
+/// <c>models/lora</c> and <c>models/embeddings</c> and picks by name; there is no prompt field,
+/// which is how prd.md §2.3 C-4 is satisfied by construction.
+/// </remarks>
+public sealed record RefineSettings
+{
+    /// <summary>Whether the pass runs. Off by default; costs nothing when off.</summary>
+    public bool Enabled { get; init; }
+
+    /// <summary>
+    /// How far the model may depart from the restoration underneath. 0 is none; measured on the
+    /// quality fixture, 0.2 beat bicubic on LPIPS by 43%, 0.3 began to invent shapes, 0.5 invented.
+    /// </summary>
+    public double Strength { get; init; } = 0.2;
+
+    /// <summary>Directory name under <c>models/diffusion</c>. Empty means none chosen.</summary>
+    public string Model { get; init; } = string.Empty;
+
+    /// <summary>File name under <c>models/lora</c>, or empty for none.</summary>
+    public string Lora { get; init; } = string.Empty;
+
+    /// <summary>File names under <c>models/embeddings</c>.</summary>
+    public IReadOnlyList<string> Embeddings { get; init; } = [];
+
+    /// <summary>Denoising steps. With an LCM LoRA 4–8 is the working range.</summary>
+    public int Steps { get; init; } = 8;
+
+    /// <summary>The generator seed. Fixed so the same region refines the same way each frame.</summary>
+    public int Seed { get; init; } = 7;
+}
+
 /// <summary>Settings that affect restoration. In the <c>restoration</c> fingerprint (prd.md §9.3).</summary>
 public sealed record RestorationSettings
 {
+    /// <summary>The optional diffusion pass (D-44).</summary>
+    public RefineSettings Refine { get; init; } = new();
+
     /// <summary>
     /// Quality preset. §15. Default <see cref="QualityPreset.Fast"/> since D-43: measured on the
     /// only footage available, the decimate-and-interpolate floor beat the super-resolution

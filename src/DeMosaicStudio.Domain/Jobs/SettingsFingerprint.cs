@@ -90,6 +90,17 @@ public static class SettingsFingerprint
         new("paddingRatio", Num(r.PaddingRatio)),
         new("preset", r.Preset.ToString()),
 
+        // The diffusion refiner (D-44), flattened with a dotted prefix so the canonical form
+        // stays one key=value per line. Same rendering as the worker: booleans as true/false, the
+        // embeddings list sorted ordinally and joined with ';', a missing LoRA as the empty string.
+        new("refine.enabled", r.Refine.Enabled ? "true" : "false"),
+        new("refine.embeddings", string.Join(";", r.Refine.Embeddings.Order(StringComparer.Ordinal))),
+        new("refine.lora", r.Refine.Lora ?? string.Empty),
+        new("refine.model", r.Refine.Model ?? string.Empty),
+        new("refine.seed", Int(r.Refine.Seed)),
+        new("refine.steps", Int(r.Refine.Steps)),
+        new("refine.strength", Num(r.Refine.Strength)),
+
         // The single-frame path's blend weight (D-43).
         new("temporalAlpha", Num(r.TemporalAlpha)),
 

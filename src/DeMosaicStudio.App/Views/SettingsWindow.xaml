@@ -152,6 +152,60 @@
                 </StackPanel>
             </TabItem>
 
+            <TabItem Header="다듬기">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <StackPanel Margin="14">
+                    <CheckBox IsChecked="{Binding RefineEnabled}" Content="확산 모델로 복원 영역 다듬기" Margin="0,0,0,4" />
+                    <TextBlock Style="{StaticResource Hint}"
+                               Text="복원된 영역 위에 이미지-투-이미지 확산 모델을 낮은 강도로 한 번 더 돌립니다. 만들어 낸 화소입니다 — 프롬프트도, 참조 이미지도 없고, 특정 인물을 향하게 할 방법이 없습니다. 실측(D-44): 강도 0.2에서 bicubic보다 LPIPS 43% 좋음, 0.3부터 없는 형태를 만들기 시작, 0.5는 창작. 영역당 약 0.13초, VRAM +2.2 GB." />
+
+                    <TextBlock Style="{StaticResource Label}" Text="모델 (models\diffusion\ 폴더)" />
+                    <ComboBox ItemsSource="{Binding DiffusionModels}" SelectedItem="{Binding RefineModel}"
+                              IsEnabled="{Binding RefineEnabled}" Margin="0,0,0,4" />
+                    <TextBlock Style="{StaticResource Hint}"
+                               Text="diffusers 형식 폴더(model_index.json 포함) 또는 단일 .safetensors 체크포인트를 담은 폴더 하나가 모델 하나입니다. SD1.5 계열이 검증됐습니다." />
+
+                    <TextBlock Style="{StaticResource Label}" Text="LoRA (models\lora\ 폴더)" />
+                    <ComboBox ItemsSource="{Binding Loras}" SelectedItem="{Binding RefineLora}"
+                              IsEnabled="{Binding RefineEnabled}" Margin="0,0,0,4" />
+                    <TextBlock Style="{StaticResource Hint}"
+                               Text="LCM LoRA를 고르면 4~8스텝으로 충분해집니다. 없으면 스텝을 20 이상으로 올려야 하고 그만큼 느립니다." />
+
+                    <TextBlock Style="{StaticResource Label}" Text="임베딩 (models\embeddings\ 폴더)" />
+                    <ItemsControl ItemsSource="{Binding EmbeddingChoices}" IsEnabled="{Binding RefineEnabled}" Margin="0,0,0,4">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <CheckBox Content="{Binding Name}" IsChecked="{Binding IsChecked}" />
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <TextBlock Style="{StaticResource Hint}"
+                               Text="특정 인물을 재현하도록 학습된 임베딩이나 LoRA는 이 프로그램의 범위 밖입니다(§2.3 C-4). 프로그램은 구분할 수 없고, 고르는 사람은 할 수 있습니다." />
+
+                    <TextBlock Style="{StaticResource Label}" Text="강도" />
+                    <DockPanel IsEnabled="{Binding RefineEnabled}">
+                        <TextBlock DockPanel.Dock="Right" Width="46" TextAlignment="Right"
+                                   Text="{Binding RefineStrength, StringFormat=F2}" />
+                        <Slider Minimum="0" Maximum="1" TickFrequency="0.05"
+                                Value="{Binding RefineStrength}" />
+                    </DockPanel>
+                    <TextBlock Style="{StaticResource Hint}"
+                               Text="0은 아무것도 안 함. 0.2 권장. 0.3 넘기면 관측을 버리고 지어냅니다." />
+
+                    <TextBlock Style="{StaticResource Label}" Text="스텝" />
+                    <DockPanel IsEnabled="{Binding RefineEnabled}">
+                        <TextBlock DockPanel.Dock="Right" Width="46" TextAlignment="Right"
+                                   Text="{Binding RefineSteps}" />
+                        <Slider Minimum="1" Maximum="16" TickFrequency="1"
+                                Value="{Binding RefineSteps}" />
+                    </DockPanel>
+
+                    <TextBlock Style="{StaticResource Hint}" Margin="0,10,0,0"
+                               Text="{Binding StoreRoot, StringFormat='파일을 넣을 곳: {0}'}" />
+                </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
             <TabItem Header="출력">
                 <StackPanel Margin="14">
                     <TextBlock Style="{StaticResource Label}" Text="코덱" />

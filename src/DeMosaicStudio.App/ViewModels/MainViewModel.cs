@@ -33,6 +33,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private readonly Dispatcher _dispatcher;
     private readonly ISettingsStore _store;
 
+    /// <summary>The folders the diffusion refiner's models live in (D-44).</summary>
+    public IModelStore ModelStore { get; }
+
     private CancellationTokenSource? _running;
     private string _status = "아직 시작하지 않았습니다";
     private bool _isBusy;
@@ -40,11 +43,12 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private int _nextId;
 
     /// <summary>Creates the view model around an engine and a place to keep settings.</summary>
-    public MainViewModel(IRestorationEngine engine, Dispatcher dispatcher, ISettingsStore store)
+    public MainViewModel(IRestorationEngine engine, Dispatcher dispatcher, ISettingsStore store, IModelStore models)
     {
         _engine = engine ?? throw new ArgumentNullException(nameof(engine));
         _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
         _store = store ?? throw new ArgumentNullException(nameof(store));
+        ModelStore = models ?? throw new ArgumentNullException(nameof(models));
 
         Settings = _store.Load();
         _jobs.Changed += OnJobsChanged;
