@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Globalization;
 using System.Runtime.CompilerServices;
@@ -28,6 +29,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     private string _refineModel = string.Empty;
     private string _refineLora = string.Empty;
     private int _refineSteps;
+    private string _storeRoot = string.Empty;
 
     private double _confidence;
     private double _maskThreshold;
@@ -53,14 +55,8 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
 
         _original = settings;
         _store = store;
-
-        // "(none)" is the empty string in the settings; the dialog needs a row to click.
-        DiffusionModels = [NONE, .. store.DiffusionModels()];
-        Loras = [NONE, .. store.Loras()];
-        EmbeddingChoices = store.Embeddings()
-            .Select(name => new EmbeddingChoice(name, settings.Restoration.Refine.Embeddings.Contains(name)))
-            .ToList();
-        StoreRoot = store.Root;
+        _storeRoot = settings.Restoration.Refine.StoreRoot ?? string.Empty;
+        Rescan(settings.Restoration.Refine.Embeddings);
 
         Reset(settings);
     }
@@ -68,17 +64,72 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     /// <summary>The row that stands for "nothing chosen".</summary>
     public const string NONE = "(없음)";
 
-    /// <summary>Where the user puts files, shown in the dialog.</summary>
-    public string StoreRoot { get; }
+    /// <summary>
+    /// Where the user keeps the files. Empty means <see cref="EffectiveStoreRoot"/> falls back to
+    /// the folder beside the program. Changing it rescans the three lists.
+    /// </summary>
+    public string StoreRoot
+    {
+        get => _storeRoot;
+        set
+        {
+            if (Set(ref _storeRoot, value ?? string.Empty))
+            {
+                Rescan(EmbeddingChoices.Where(c => c.IsChecked).Select(c => c.Name).ToList());
+                Raise(nameof(EffectiveStoreRoot));
+            }
+        }
+    }
 
-    /// <summary>What is in <c>models/diffusion</c>, with a "(none)" row first.</summary>
-    public IReadOnlyList<string> DiffusionModels { get; }
+    /// <summary>The folder actually scanned, for display.</summary>
+    public string EffectiveStoreRoot => string.IsNullOrWhiteSpace(StoreRoot) ? _store.DefaultRoot : StoreRoot;
 
-    /// <summary>What is in <c>models/lora</c>, with a "(none)" row first.</summary>
-    public IReadOnlyList<string> Loras { get; }
+    /// <summary>What is in <c>&lt;root&gt;/diffusion</c>, with a "(none)" row first.</summary>
+    public ObservableCollection<string> DiffusionModels { get; } = [];
 
-    /// <summary>What is in <c>models/embeddings</c>, each with a checkbox.</summary>
-    public IReadOnlyList<EmbeddingChoice> EmbeddingChoices { get; }
+    /// <summary>What is in <c>&lt;root&gt;/lora</c>, with a "(none)" row first.</summary>
+    public ObservableCollection<string> Loras { get; } = [];
+
+    /// <summary>What is in <c>&lt;root&gt;/embeddings</c>, each with a checkbox.</summary>
+    public ObservableCollection<EmbeddingChoice> EmbeddingChoices { get; } = [];
+
+    /// <summary>Re-reads the three folders under the current root, keeping what was selected if it still exists.</summary>
+    private void Rescan(IReadOnlyList<string> checkedEmbeddings)
+    {
+        var root = StoreRoot;
+
+        // "(none)" is the empty string in the settings; the dialog needs a row to click.
+        Refill(DiffusionModels, [NONE, .. _store.DiffusionModels(root)]);
+        Refill(Loras, [NONE, .. _store.Loras(root)]);
+        var embeddings = _store.Embeddings(root)
+            .Select(name => new EmbeddingChoice(name, checkedEmbeddings.Contains(name)))
+            .ToList();
+        EmbeddingChoices.Clear();
+        foreach (var choice in embeddings)
+        {
+            EmbeddingChoices.Add(choice);
+        }
+
+        // A model that is not in the new folder cannot stay selected, or the combo shows nothing.
+        if (!DiffusionModels.Contains(RefineModel))
+        {
+            RefineModel = NONE;
+        }
+
+        if (!Loras.Contains(RefineLora))
+        {
+            RefineLora = NONE;
+        }
+
+        static void Refill(ObservableCollection<string> target, IEnumerable<string> items)
+        {
+            target.Clear();
+            foreach (var item in items)
+            {
+                target.Add(item);
+            }
+        }
+    }
 
     /// <summary>Whether the diffusion pass runs (D-44).</summary>
     public bool RefineEnabled
@@ -289,6 +340,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
                 Lora = RefineLora == NONE ? string.Empty : RefineLora,
                 Embeddings = EmbeddingChoices.Where(c => c.IsChecked).Select(c => c.Name).ToList(),
                 Steps = RefineSteps,
+                StoreRoot = StoreRoot.Trim(),
             },
         },
         Encode = _original.Encode with
@@ -320,6 +372,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         ConstantQuality = settings.Encode.ConstantQuality;
 
         RefineEnabled = settings.Restoration.Refine.Enabled;
+        StoreRoot = settings.Restoration.Refine.StoreRoot ?? string.Empty;
         RefineStrength = settings.Restoration.Refine.Strength;
         RefineModel = string.IsNullOrEmpty(settings.Restoration.Refine.Model) ? NONE : settings.Restoration.Refine.Model;
         RefineLora = string.IsNullOrEmpty(settings.Restoration.Refine.Lora) ? NONE : settings.Restoration.Refine.Lora;
@@ -330,16 +383,19 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         }
     }
 
-    private void Set<T>(ref T field, T value, [CallerMemberName] string? name = null)
+    private bool Set<T>(ref T field, T value, [CallerMemberName] string? name = null)
     {
         if (EqualityComparer<T>.Default.Equals(field, value))
         {
-            return;
+            return false;
         }
 
         field = value;
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+        Raise(name);
+        return true;
     }
+
+    private void Raise(string? name) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 }
 
 /// <summary>One embedding file and whether it is selected.</summary>

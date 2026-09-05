@@ -32,4 +32,36 @@ public partial class SettingsWindow : Window
     // Deliberately does not close: restoring defaults is an edit, and the user should see what it
     // did before committing to it.
     private void OnRestoreDefaults(object sender, RoutedEventArgs e) => Model.RestoreDefaults();
+
+    private void OnBrowseStore(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Microsoft.Win32.OpenFolderDialog
+        {
+            InitialDirectory = System.IO.Directory.Exists(Model.EffectiveStoreRoot) ? Model.EffectiveStoreRoot : null,
+        };
+        if (dialog.ShowDialog(this) == true)
+        {
+            Model.StoreRoot = dialog.FolderName;
+        }
+    }
+
+    // Opens the folder in Explorer, creating the three subfolders first so the user sees where
+    // each kind of file goes rather than an empty directory.
+    private void OnOpenStore(object sender, RoutedEventArgs e)
+    {
+        var root = Model.EffectiveStoreRoot;
+        try
+        {
+            foreach (var sub in new[] { "diffusion", "lora", "embeddings" })
+            {
+                System.IO.Directory.CreateDirectory(System.IO.Path.Combine(root, sub));
+            }
+
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", $"\"{root}\"") { UseShellExecute = true });
+        }
+        catch (Exception exception) when (exception is System.IO.IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
+        {
+            MessageBox.Show(this, exception.Message, "폴더를 열 수 없습니다", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
 }

@@ -1794,3 +1794,11 @@ is `warm_optional_imports()` at worker start, on the main thread, before the rea
 before any job: scipy, diffusers, transformers and peft load then, and the same job runs to
 completion. Cost: worker start-up 2 → 6 s when diffusers is installed. The guard test pins the
 *order* (stdio → warm → run), because the order is the fix.
+
+**The folder is the user's choice** (`refine.storeRoot`, same day). Multi-gigabyte files should
+not be forced onto the drive the program happens to be on, and `%LOCALAPPDATA%` is usually the
+narrow one. Empty means the default beside the program; the dialog has a text box, a browse
+button and an "open" button that creates the three subfolders first so the user sees where each
+kind of file goes. Changing the root rescans the lists and drops a selection that no longer
+exists in the new folder. Not fingerprinted — the folder is not the output, the names are — and
+the fingerprint guard carries that as a recorded exclusion rather than a silent one.

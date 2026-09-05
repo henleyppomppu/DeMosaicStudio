@@ -194,6 +194,13 @@ public sealed class SettingsFingerprintTests
     [InlineData(typeof(EncodeSettings), FingerprintScope.Encode)]
     public void Every_fingerprinted_setting_appears_in_its_canonical_form(Type settingsType, FingerprintScope scope)
     {
+        // Settings that change no output pixel are excluded on purpose, each with its reason
+        // recorded on the property. Add here only with such a reason.
+        var excluded = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "Refine.StoreRoot",   // where the files are, not which files (D-44)
+        };
+
         var canonical = SettingsFingerprint.Canonicalize(new JobSettings(), scope);
         var keys = canonical.Split('\n').Select(l => l.Split('=')[0]).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
@@ -208,6 +215,11 @@ public sealed class SettingsFingerprintTests
                 foreach (var nested in property.PropertyType.GetProperties())
                 {
                     var key = $"{property.Name}.{nested.Name}";
+                    if (excluded.Contains(key))
+                    {
+                        continue;
+                    }
+
                     Assert.True(
                         keys.Contains(key),
                         $"{settingsType.Name}.{key} is not in the {scope} fingerprint. "

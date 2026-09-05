@@ -10,20 +10,20 @@ namespace DeMosaicStudio.Infrastructure.Settings;
 /// </remarks>
 public sealed class FolderModelStore : IModelStore
 {
-    /// <summary>Creates a store rooted at <paramref name="root"/> (the <c>models</c> directory).</summary>
-    public FolderModelStore(string root)
+    /// <summary>Creates a store whose default root is <paramref name="defaultRoot"/> (the <c>models</c> directory beside the program).</summary>
+    public FolderModelStore(string defaultRoot)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(root);
-        Root = root;
+        ArgumentException.ThrowIfNullOrWhiteSpace(defaultRoot);
+        DefaultRoot = defaultRoot;
     }
 
     /// <inheritdoc />
-    public string Root { get; }
+    public string DefaultRoot { get; }
 
     /// <inheritdoc />
-    public IReadOnlyList<string> DiffusionModels()
+    public IReadOnlyList<string> DiffusionModels(string root)
     {
-        var directory = Path.Combine(Root, "diffusion");
+        var directory = Path.Combine(Resolve(root), "diffusion");
         if (!Directory.Exists(directory))
         {
             return [];
@@ -38,14 +38,16 @@ public sealed class FolderModelStore : IModelStore
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<string> Loras() => Files("lora");
+    public IReadOnlyList<string> Loras(string root) => Files(root, "lora");
 
     /// <inheritdoc />
-    public IReadOnlyList<string> Embeddings() => Files("embeddings");
+    public IReadOnlyList<string> Embeddings(string root) => Files(root, "embeddings");
 
-    private List<string> Files(string folder)
+    private string Resolve(string root) => string.IsNullOrWhiteSpace(root) ? DefaultRoot : root;
+
+    private List<string> Files(string root, string folder)
     {
-        var directory = Path.Combine(Root, folder);
+        var directory = Path.Combine(Resolve(root), folder);
         if (!Directory.Exists(directory))
         {
             return [];

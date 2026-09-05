@@ -360,7 +360,8 @@ class JobRunner:
         # loads on first use, and a load failure downgrades the job to unrefined with W6101 once
         # rather than failing it - the restoration underneath is complete without it.
         refine_settings = RefineSettings.from_settings(settings)
-        refiner = DiffusionRefiner(MODELS, refine_settings) if refine_settings.enabled else None
+        refine_store = Path(refine_settings.store_root) if refine_settings.store_root else MODELS
+        refiner = DiffusionRefiner(refine_store, refine_settings) if refine_settings.enabled else None
         refine_stats = RefineStats()
 
         emitter.progress(context.job_id, Stage.PROBING, 0.0, force=True)

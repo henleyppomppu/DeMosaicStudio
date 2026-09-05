@@ -255,6 +255,9 @@ public static class WorkerCodec
                     settings.Restoration.Refine.Embeddings.Select(e => (JsonNode?)JsonValue.Create(e)).ToArray()),
                 ["steps"] = settings.Restoration.Refine.Steps,
                 ["seed"] = settings.Restoration.Refine.Seed,
+                ["storeRoot"] = string.IsNullOrWhiteSpace(settings.Restoration.Refine.StoreRoot)
+                    ? null
+                    : settings.Restoration.Refine.StoreRoot,
             },
         },
         ["encode"] = new JsonObject

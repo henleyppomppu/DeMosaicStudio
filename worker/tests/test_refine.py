@@ -38,6 +38,12 @@ def test_absent_refine_means_off_with_the_shipped_defaults() -> None:
     assert not s.enabled and s.strength == 0.2 and s.steps == 8 and s.seed == 7
 
 
+def test_the_store_root_is_read_and_defaults_to_empty() -> None:
+    assert RefineSettings.from_settings({}).store_root == ""
+    s = RefineSettings.from_settings({"restoration": {"refine": {"storeRoot": "  E:\\models  "}}})
+    assert s.store_root == "E:\\models"
+
+
 def test_settings_are_read_and_clamped() -> None:
     s = RefineSettings.from_settings({"restoration": {"refine": {
         "enabled": True, "strength": 1.7, "model": "sd15", "lora": "", "embeddings": ["a", "", "b"],

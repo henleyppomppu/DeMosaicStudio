@@ -11,9 +11,9 @@ public sealed class FolderModelStoreTests : IDisposable
     public void Missing_folders_are_empty_lists_not_errors()
     {
         var store = new FolderModelStore(_root);
-        Assert.Empty(store.DiffusionModels());
-        Assert.Empty(store.Loras());
-        Assert.Empty(store.Embeddings());
+        Assert.Empty(store.DiffusionModels(""));
+        Assert.Empty(store.Loras(""));
+        Assert.Empty(store.Embeddings(""));
     }
 
     [Fact]
@@ -31,11 +31,13 @@ public sealed class FolderModelStoreTests : IDisposable
         Directory.CreateDirectory(Path.Combine(_root, "embeddings"));
         File.WriteAllText(Path.Combine(_root, "embeddings", "style.pt"), "x");
 
-        var store = new FolderModelStore(_root);
+        var store = new FolderModelStore(Path.Combine(_root, "somewhere-else"));
 
-        Assert.Equal(["alpha-ckpt", "zeta-model"], store.DiffusionModels());
-        Assert.Equal(["lcm"], store.Loras());
-        Assert.Equal(["style"], store.Embeddings());
+        // An empty root means the default; an explicit one is used as given.
+        Assert.Empty(store.DiffusionModels(""));
+        Assert.Equal(["alpha-ckpt", "zeta-model"], store.DiffusionModels(_root));
+        Assert.Equal(["lcm"], store.Loras(_root));
+        Assert.Equal(["style"], store.Embeddings(_root));
     }
 
     public void Dispose()

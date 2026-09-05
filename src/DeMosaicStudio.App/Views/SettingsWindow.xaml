@@ -159,19 +159,28 @@
                     <TextBlock Style="{StaticResource Hint}"
                                Text="복원된 영역 위에 이미지-투-이미지 확산 모델을 낮은 강도로 한 번 더 돌립니다. 만들어 낸 화소입니다 — 프롬프트도, 참조 이미지도 없고, 특정 인물을 향하게 할 방법이 없습니다. 실측(D-44): 강도 0.2에서 bicubic보다 LPIPS 43% 좋음, 0.3부터 없는 형태를 만들기 시작, 0.5는 창작. 영역당 약 0.13초, VRAM +2.2 GB." />
 
-                    <TextBlock Style="{StaticResource Label}" Text="모델 (models\diffusion\ 폴더)" />
+                    <TextBlock Style="{StaticResource Label}" Text="모델 폴더" />
+                    <DockPanel Margin="0,0,0,4">
+                        <Button DockPanel.Dock="Right" Content="열기" Click="OnOpenStore" MinWidth="60" Margin="4,0,0,0" />
+                        <Button DockPanel.Dock="Right" Content="찾아보기…" Click="OnBrowseStore" MinWidth="90" Margin="4,0,0,0" />
+                        <TextBox Text="{Binding StoreRoot, UpdateSourceTrigger=PropertyChanged}" VerticalContentAlignment="Center" />
+                    </DockPanel>
+                    <TextBlock Style="{StaticResource Hint}"
+                               Text="{Binding EffectiveStoreRoot, StringFormat='비우면 프로그램 옆을 씁니다. 지금 읽는 곳: {0}  — 그 아래에 diffusion\, lora\, embeddings\ 폴더를 만들어 파일을 넣으세요. 큰 파일이니 아무 드라이브나 됩니다.'}" />
+
+                    <TextBlock Style="{StaticResource Label}" Text="모델 (diffusion\ 폴더)" />
                     <ComboBox ItemsSource="{Binding DiffusionModels}" SelectedItem="{Binding RefineModel}"
                               IsEnabled="{Binding RefineEnabled}" Margin="0,0,0,4" />
                     <TextBlock Style="{StaticResource Hint}"
                                Text="diffusers 형식 폴더(model_index.json 포함) 또는 단일 .safetensors 체크포인트를 담은 폴더 하나가 모델 하나입니다. SD1.5 계열이 검증됐습니다." />
 
-                    <TextBlock Style="{StaticResource Label}" Text="LoRA (models\lora\ 폴더)" />
+                    <TextBlock Style="{StaticResource Label}" Text="LoRA (lora\ 폴더)" />
                     <ComboBox ItemsSource="{Binding Loras}" SelectedItem="{Binding RefineLora}"
                               IsEnabled="{Binding RefineEnabled}" Margin="0,0,0,4" />
                     <TextBlock Style="{StaticResource Hint}"
                                Text="LCM LoRA를 고르면 4~8스텝으로 충분해집니다. 없으면 스텝을 20 이상으로 올려야 하고 그만큼 느립니다." />
 
-                    <TextBlock Style="{StaticResource Label}" Text="임베딩 (models\embeddings\ 폴더)" />
+                    <TextBlock Style="{StaticResource Label}" Text="임베딩 (embeddings\ 폴더)" />
                     <ItemsControl ItemsSource="{Binding EmbeddingChoices}" IsEnabled="{Binding RefineEnabled}" Margin="0,0,0,4">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
@@ -200,8 +209,6 @@
                                 Value="{Binding RefineSteps}" />
                     </DockPanel>
 
-                    <TextBlock Style="{StaticResource Hint}" Margin="0,10,0,0"
-                               Text="{Binding StoreRoot, StringFormat='파일을 넣을 곳: {0}'}" />
                 </StackPanel>
                 </ScrollViewer>
             </TabItem>

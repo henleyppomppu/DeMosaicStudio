@@ -13,17 +13,17 @@ namespace DeMosaicStudio.Application.Settings;
 /// </remarks>
 public interface IModelStore
 {
-    /// <summary>Directory names under <c>models/diffusion</c> that look like a pipeline or a checkpoint.</summary>
-    IReadOnlyList<string> DiffusionModels();
+    /// <summary>The root used when the user has not chosen one: <c>models</c> beside the program.</summary>
+    string DefaultRoot { get; }
 
-    /// <summary>File names (without extension) under <c>models/lora</c>.</summary>
-    IReadOnlyList<string> Loras();
+    /// <summary>Directory names under <c>&lt;root&gt;/diffusion</c> that look like a pipeline or a checkpoint.</summary>
+    IReadOnlyList<string> DiffusionModels(string root);
 
-    /// <summary>File names (without extension) under <c>models/embeddings</c>.</summary>
-    IReadOnlyList<string> Embeddings();
+    /// <summary>File names (without extension) under <c>&lt;root&gt;/lora</c>.</summary>
+    IReadOnlyList<string> Loras(string root);
 
-    /// <summary>Where the folders are, so the dialog can say where to put files.</summary>
-    string Root { get; }
+    /// <summary>File names (without extension) under <c>&lt;root&gt;/embeddings</c>.</summary>
+    IReadOnlyList<string> Embeddings(string root);
 }
 
 /// <summary>

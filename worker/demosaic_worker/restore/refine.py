@@ -53,6 +53,9 @@ class RefineSettings:
     embeddings: tuple[str, ...] = ()
     steps: int = 8
     seed: int = 7
+    #: Where the folders live; empty means the default beside the worker. Not fingerprinted:
+    #: the folder does not change the output, the names chosen from it do.
+    store_root: str = ""
 
     @classmethod
     def from_settings(cls, settings: dict[str, Any]) -> "RefineSettings":
@@ -68,6 +71,7 @@ class RefineSettings:
             embeddings=tuple(str(e) for e in embeddings if e),
             steps=max(1, int(refine.get("steps", 8))),
             seed=int(refine.get("seed", 7)),
+            store_root=str(refine.get("storeRoot") or "").strip(),
         )
 
 

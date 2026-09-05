@@ -136,6 +136,16 @@ public sealed record RefineSettings
 
     /// <summary>The generator seed. Fixed so the same region refines the same way each frame.</summary>
     public int Seed { get; init; } = 7;
+
+    /// <summary>
+    /// Where the <c>diffusion</c>, <c>lora</c> and <c>embeddings</c> folders live. Empty means the
+    /// default beside the program. A user's own choice so multi-gigabyte files can sit on any drive.
+    /// </summary>
+    /// <remarks>
+    /// <b>Not fingerprinted.</b> The folder does not change the output; the names chosen from it do,
+    /// and those are. Moving the same files to another drive must not discard cached work.
+    /// </remarks>
+    public string StoreRoot { get; init; } = string.Empty;
 }
 
 /// <summary>Settings that affect restoration. In the <c>restoration</c> fingerprint (prd.md §9.3).</summary>
