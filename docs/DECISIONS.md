@@ -1810,8 +1810,33 @@ absence of a prompt is how §2.3 C-4 is *enforced* rather than promised. So each
 the folder gets a use — unused, positive, negative — and the worker composes the prompts from
 the chosen tokens and nothing else (`refine.embeddings` → positive, `refine.negativeEmbeddings`
 → negative; the token is the file name, which is also what `load_textual_inversion` registers).
-Quality suppressors like EasyNegative belong in the negative prompt, which is the case that
-matters at strength 0.2. Whether a positive token moves anything at this strength is
-**unmeasured** — the Phase 0 probe found a plain word prompt made no difference, and an
-embedding is a learned word. Both lists are fingerprinted: a different prompt is a different
-output.
+Both lists are fingerprinted: a different prompt is a different output.
+
+**Measured, and it does nothing at this strength** (same day, EasyNegative from the
+`embed/EasyNegative` mirror — the original `gsdf` repository now answers 401 — through the
+shipped `DiffusionRefiner` on the quality fixture, 24 frames, luma path, steps 8, seed 7):
+
+| | PSNR | LPIPS | flicker | s/region |
+| --- | ---: | ---: | ---: | ---: |
+| bicubic (input to the refiner) | 29.79 | 0.1614 | 0.0181 | — |
+| no tokens, guidance 1.5 (shipped) | 27.52 | 0.1412 | 0.0207 | 0.140 |
+| EasyNegative negative, guidance 1.5 | 27.50 | 0.1414 | 0.0209 | 0.132 |
+| no tokens, guidance 3.0 | 27.52 | 0.1412 | 0.0207 | 0.131 |
+| EasyNegative negative, guidance 3.0 | 27.40 | 0.1418 | 0.0233 | 0.130 |
+
+The mean pixel change the embedding makes inside the region at the shipped guidance is 0.27
+on a 0–255 scale — below anything a person could see; raising guidance to 3 makes it visible
+and slightly *worse* (more flicker). The reason is structural: at strength 0.2 only the last
+two of ten noise levels are traversed, and a negative prompt steers the denoising direction,
+which barely matters when there is almost no denoising left to do. So the role selector ships
+as the mechanism by which an embedding *can* act — the honest one, with no text field — but
+no embedding is recommended, and the dialog says so.
+
+Two smaller facts from the same run. With no tokens the conditional and unconditional
+embeddings are identical, so classifier-free guidance cancels exactly and the shipped 1.5
+does nothing except run the UNet on a doubled batch: guidance 1.0 was 7% faster with a
+maximum pixel difference of 1.2 (fp16 noise). Not changed — the gain is small and the setting
+becomes meaningful the moment a token is chosen. And the luma-only Phase 1 path scores LPIPS
+0.141 where the Phase 0 RGB probe scored 0.092: the RGB probe let the model repaint chroma,
+which Phase 1 deliberately withholds (D-44 decision). That gap is the price of the colour
+guard, and it is a candidate for a later measurement, not a defect.
