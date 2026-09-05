@@ -1848,6 +1848,34 @@ neither the input nor the clean frame. EasyNegative was trained against anime-st
 and has no opinion about invented stripes. The 0.2 default stands; the embedding role
 selector stays as the honest mechanism, with nothing recommended.
 
+**Checkpoint choice matters more than any embedding** (2026-09-06, same setup, no prompt, LCM-LoRA,
+8 steps). Two photoreal SD1.5 fine-tunes in diffusers format beside the base model:
+
+| | PSNR | LPIPS | flicker | s/region |
+| --- | ---: | ---: | ---: | ---: |
+| bicubic | 29.79 | 0.1614 | 0.0181 | — |
+| SD1.5 base, s=0.2 | 27.52 | 0.1412 | 0.0207 | 0.148 |
+| **Realistic Vision 5.1, s=0.2** | **28.51** | **0.1365** | 0.0205 | 0.141 |
+| epiCRealism, s=0.2 | 28.37 | 0.1405 | 0.0203 | 0.137 |
+| SD1.5 base, s=0.3 | 26.91 | 0.1392 | 0.0267 | 0.186 |
+| Realistic Vision 5.1, s=0.3 | 27.55 | 0.1342 | 0.0251 | 0.186 |
+| epiCRealism, s=0.3 | 27.24 | 0.1390 | 0.0282 | 0.185 |
+
+Realistic Vision beats the base on all three at both strengths: +1.0 dB, LPIPS −3.3%, and it
+does so without the faint ring the base model draws along the region's edge at 0.3. That is
+more than the whole embedding experiment moved anything, in the right direction, for a folder
+swap. epiCRealism is between the two — its PSNR gain is the same but its LPIPS is not. The
+recommendation is therefore **Realistic Vision 5.1 at strength 0.2** (`SG161222/Realistic_Vision_V5.1_noVAE`,
+the diffusers folders only, 3.97 GB in fp32 because the repository has no fp16 variant).
+Same caveat as every number here: the fixture's region is soft, out-of-focus content; the
+ranking wants confirming on a sharp real crop before anyone calls it settled.
+
+Found on the way: epiCRealism's `model_index.json` lists a `feature_extractor` that the
+downloaded folder does not contain, and diffusers refused to load the pipeline even with the
+safety checker off. The loader now passes `feature_extractor=None` as well — a hand-copied
+repository that lists one but lacks it must still load, since the only consumer of that
+preprocessor is the checker we disable.
+
 Two smaller facts from the same run. With no tokens the conditional and unconditional
 embeddings are identical, so classifier-free guidance cancels exactly and the shipped 1.5
 does nothing except run the UNet on a doubled batch: guidance 1.0 was 7% faster with a

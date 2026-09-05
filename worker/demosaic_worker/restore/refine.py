@@ -143,7 +143,12 @@ class DiffusionRefiner:
                     str(single), torch_dtype=dtype, safety_checker=None, requires_safety_checker=False
                 )
             else:
-                kwargs: dict[str, Any] = {"torch_dtype": dtype, "safety_checker": None, "requires_safety_checker": False}
+                kwargs: dict[str, Any] = {
+                    "torch_dtype": dtype,
+                    # The safety checker is off, so its image preprocessor is not needed either; a
+                    # repository whose model_index lists one but whose folder lacks it must still load.
+                    "safety_checker": None, "feature_extractor": None, "requires_safety_checker": False,
+                }
                 # fp16 variants are what fetch_diffusion.py keeps; a hand-copied repository may have full ones.
                 if any(model_dir.rglob("*.fp16.safetensors")):
                     kwargs["variant"] = "fp16"
