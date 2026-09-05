@@ -106,6 +106,7 @@ public static class SettingsBounds
                     Model = settings.Restoration.Refine.Model ?? string.Empty,
                     Lora = settings.Restoration.Refine.Lora ?? string.Empty,
                     Embeddings = settings.Restoration.Refine.Embeddings ?? [],
+                    NegativeEmbeddings = settings.Restoration.Refine.NegativeEmbeddings ?? [],
                 },
             },
             Encode = settings.Encode with

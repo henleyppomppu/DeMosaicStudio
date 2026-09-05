@@ -52,6 +52,7 @@ def test_settings_are_read_and_clamped() -> None:
     assert s.enabled and s.strength == 1.0 and s.model == "sd15"
     assert s.lora is None                       # empty string is "none"
     assert s.embeddings == ("a", "b")           # empties dropped
+    assert s.negative_embeddings == ()
     assert s.steps == 1                         # floor
 
 
@@ -168,7 +169,7 @@ def test_only_the_luma_change_comes_back(monkeypatch: pytest.MonkeyPatch) -> Non
     assert out.shape == luma.shape
     assert np.allclose(out, 110.0, atol=1.5)
     call = pipe.calls[0]
-    assert call["prompt"] == ""                       # C-4 by construction
+    assert call["prompt"] == "" and call["negative_prompt"] is None   # nothing chosen: nothing said
     assert call["strength"] == 0.2 and call["num_inference_steps"] == 8
     # Worked at the network's scale: the 60-wide crop went in upscaled toward 512.
     assert call["image"].width >= 480
@@ -208,3 +209,23 @@ def test_an_unavailable_refiner_warns_once_and_the_job_completes(tmp_path: Path)
     assert "refiner" in warnings[0]["message"]
     assert summary["regionsRefined"] == 0
     assert (tmp_path / "o.mp4").exists()
+
+
+def test_prompts_are_the_chosen_tokens_and_nothing_else(monkeypatch: pytest.MonkeyPatch) -> None:
+    """There is no text field; the embeddings' file names are the only words that can reach the model."""
+    import PIL.Image
+
+    refiner = DiffusionRefiner(Path("/nowhere"), RefineSettings(
+        enabled=True, model="x", embeddings=("filmgrain",), negative_embeddings=("easynegative", "badhands")))
+    pipe = _FakePipe(shift=0.0)
+    refiner._pipe = pipe
+    refiner._torch = type("T", (), {"Generator": lambda self, d: type("G", (), {"manual_seed": lambda s, n: s})()})()
+    monkeypatch.setattr(PIL.Image, "fromarray", lambda a: _FakeImage(np.asarray(a)))
+    monkeypatch.setattr(PIL.Image, "new", lambda mode, size: _FakeImage(np.zeros((size[1], size[0], 3), np.uint8)))
+    _FakeImage.paste = lambda self, im, box: self.array.__setitem__(  # type: ignore[attr-defined]
+        (slice(box[1], box[1] + im.height), slice(box[0], box[0] + im.width)), im.array)
+
+    refiner.refine_luma(np.full((16, 16), 100.0), np.full((16, 16), 128.0), np.full((16, 16), 128.0))
+
+    assert pipe.calls[0]["prompt"] == "filmgrain"
+    assert pipe.calls[0]["negative_prompt"] == "easynegative badhands"

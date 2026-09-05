@@ -1802,3 +1802,16 @@ button and an "open" button that creates the three subfolders first so the user 
 kind of file goes. Changing the root rescans the lists and drops a selection that no longer
 exists in the new folder. Not fingerprinted — the folder is not the output, the names are — and
 the fingerprint guard carries that as a recorded exclusion rather than a silent one.
+
+**Embeddings have a role, not a text field** (same day). With `prompt=""` a textual-inversion
+embedding was loaded and never referenced — inert. The obvious fix, a token or prompt box, is
+the one thing this product must not have: any box that takes letters takes a name, and the
+absence of a prompt is how §2.3 C-4 is *enforced* rather than promised. So each embedding in
+the folder gets a use — unused, positive, negative — and the worker composes the prompts from
+the chosen tokens and nothing else (`refine.embeddings` → positive, `refine.negativeEmbeddings`
+→ negative; the token is the file name, which is also what `load_textual_inversion` registers).
+Quality suppressors like EasyNegative belong in the negative prompt, which is the case that
+matters at strength 0.2. Whether a positive token moves anything at this strength is
+**unmeasured** — the Phase 0 probe found a plain word prompt made no difference, and an
+embedding is a learned word. Both lists are fingerprinted: a different prompt is a different
+output.

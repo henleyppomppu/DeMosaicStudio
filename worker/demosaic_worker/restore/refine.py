@@ -50,7 +50,11 @@ class RefineSettings:
     strength: float = 0.2
     model: str = ""
     lora: str | None = None
+    #: Embeddings whose token goes into the positive prompt. The prompt is *only* these tokens.
     embeddings: tuple[str, ...] = ()
+    #: Embeddings whose token goes into the negative prompt - quality suppressors like
+    #: EasyNegative. Same rule: tokens only, never free text.
+    negative_embeddings: tuple[str, ...] = ()
     steps: int = 8
     seed: int = 7
     #: Where the folders live; empty means the default beside the worker. Not fingerprinted:
@@ -63,12 +67,14 @@ class RefineSettings:
         refine = (settings.get("restoration") or {}).get("refine") or {}
         lora = refine.get("lora") or None
         embeddings = refine.get("embeddings") or []
+        negatives = refine.get("negativeEmbeddings") or []
         return cls(
             enabled=bool(refine.get("enabled", False)),
             strength=float(np.clip(float(refine.get("strength", 0.2)), 0.0, 1.0)),
             model=str(refine.get("model") or ""),
             lora=str(lora) if lora else None,
             embeddings=tuple(str(e) for e in embeddings if e),
+            negative_embeddings=tuple(str(e) for e in negatives if e),
             steps=max(1, int(refine.get("steps", 8))),
             seed=int(refine.get("seed", 7)),
             store_root=str(refine.get("storeRoot") or "").strip(),
@@ -149,7 +155,7 @@ class DiffusionRefiner:
                 pipe.scheduler = LCMScheduler.from_config(pipe.scheduler.config)
                 pipe.load_lora_weights(str(lora.parent), weight_name=lora.name)
                 pipe.fuse_lora()
-            for name in self.settings.embeddings:
+            for name in (*self.settings.embeddings, *self.settings.negative_embeddings):
                 embedding = self._find(self.store / "embeddings", name)
                 pipe.load_textual_inversion(str(embedding), token=embedding.stem)
         except WorkerError:
@@ -190,9 +196,13 @@ class DiffusionRefiner:
             padded.paste(big, (0, 0))
             big = padded
 
+        # The prompts are the chosen embeddings' tokens and nothing else. There is no text field
+        # anywhere in the product, so nothing a person types can reach here (section 2.3 C-4);
+        # what *can* reach here is the name of a file the user placed in the embeddings folder.
         generator = torch.Generator(pipe.device).manual_seed(self.settings.seed)
         out = pipe(
-            prompt="",
+            prompt=" ".join(self.settings.embeddings),
+            negative_prompt=" ".join(self.settings.negative_embeddings) or None,
             image=big,
             strength=self.settings.strength,
             num_inference_steps=self.settings.steps,

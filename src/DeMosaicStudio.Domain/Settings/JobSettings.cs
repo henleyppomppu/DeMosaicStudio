@@ -128,8 +128,14 @@ public sealed record RefineSettings
     /// <summary>File name under <c>models/lora</c>, or empty for none.</summary>
     public string Lora { get; init; } = string.Empty;
 
-    /// <summary>File names under <c>models/embeddings</c>.</summary>
+    /// <summary>
+    /// Embeddings whose token forms the positive prompt. The prompt is those tokens and nothing
+    /// else — there is no text field, which is how §2.3 C-4 is kept by construction.
+    /// </summary>
     public IReadOnlyList<string> Embeddings { get; init; } = [];
+
+    /// <summary>Embeddings whose token forms the negative prompt (quality suppressors).</summary>
+    public IReadOnlyList<string> NegativeEmbeddings { get; init; } = [];
 
     /// <summary>Denoising steps. With an LCM LoRA 4–8 is the working range.</summary>
     public int Steps { get; init; } = 8;

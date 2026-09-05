@@ -28,7 +28,8 @@
             "lora": null,
             "embeddings": [],
             "steps": 8,
-            "seed": 7
+            "seed": 7,
+            "negativeEmbeddings": []
           }
         },
         "encode": {
@@ -43,8 +44,8 @@
           "digest": "sha256:1517d424987199e4c748c62257ffc2492314bea2fe4a1db7407b04964e1222c3"
         },
         "restoration": {
-          "canonical": "alignConfMin=0.3500\nfeatherWidth=3\nminRestorationConfidence=0.0000\npaddingRatio=0.1500\npreset=Fast\nrefine.embeddings=\nrefine.enabled=false\nrefine.lora=\nrefine.model=\nrefine.seed=7\nrefine.steps=8\nrefine.strength=0.2000\ntemporalAlpha=0.3000\ntemporalWindow=auto",
-          "digest": "sha256:dee709b0fa0556d97c4e302903a7f842b0e02a2e743537ea303e2f7b385a0241"
+          "canonical": "alignConfMin=0.3500\nfeatherWidth=3\nminRestorationConfidence=0.0000\npaddingRatio=0.1500\npreset=Fast\nrefine.embeddings=\nrefine.enabled=false\nrefine.lora=\nrefine.model=\nrefine.negativeEmbeddings=\nrefine.seed=7\nrefine.steps=8\nrefine.strength=0.2000\ntemporalAlpha=0.3000\ntemporalWindow=auto",
+          "digest": "sha256:ddaceacb8aab4aa2ef3c179f9d5dc9fc3ce44b0357f382edb7f9ae8b0313ec76"
         },
         "encode": {
           "canonical": "codec=H265\nconstantQuality=18\nprofile=QualityX265",
@@ -82,7 +83,10 @@
               "apple"
             ],
             "steps": 8,
-            "seed": 7
+            "seed": 7,
+            "negativeEmbeddings": [
+              "easynegative"
+            ]
           }
         },
         "encode": {
@@ -97,8 +101,8 @@
           "digest": "sha256:1517d424987199e4c748c62257ffc2492314bea2fe4a1db7407b04964e1222c3"
         },
         "restoration": {
-          "canonical": "alignConfMin=0.3500\nfeatherWidth=3\nminRestorationConfidence=0.0000\npaddingRatio=0.1500\npreset=Fast\nrefine.embeddings=apple;zebra\nrefine.enabled=true\nrefine.lora=lcm-lora-sdv1-5\nrefine.model=stable-diffusion-v1-5\nrefine.seed=7\nrefine.steps=8\nrefine.strength=0.2000\ntemporalAlpha=0.3000\ntemporalWindow=auto",
-          "digest": "sha256:0e5590fe214612640f690d31dd8b14f5d892e667fa3ce1e96471bfd3592dfcdd"
+          "canonical": "alignConfMin=0.3500\nfeatherWidth=3\nminRestorationConfidence=0.0000\npaddingRatio=0.1500\npreset=Fast\nrefine.embeddings=apple;zebra\nrefine.enabled=true\nrefine.lora=lcm-lora-sdv1-5\nrefine.model=stable-diffusion-v1-5\nrefine.negativeEmbeddings=easynegative\nrefine.seed=7\nrefine.steps=8\nrefine.strength=0.2000\ntemporalAlpha=0.3000\ntemporalWindow=auto",
+          "digest": "sha256:e0932b72e975853dc848a446874540578ca5beb4d6c8727484d7f8be0e3ecc73"
         },
         "encode": {
           "canonical": "codec=H265\nconstantQuality=18\nprofile=QualityX265",

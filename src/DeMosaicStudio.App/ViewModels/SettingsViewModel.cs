@@ -56,7 +56,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         _original = settings;
         _store = store;
         _storeRoot = settings.Restoration.Refine.StoreRoot ?? string.Empty;
-        Rescan(settings.Restoration.Refine.Embeddings);
+        Rescan(UsesOf(settings.Restoration.Refine));
 
         Reset(settings);
     }
@@ -75,7 +75,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         {
             if (Set(ref _storeRoot, value ?? string.Empty))
             {
-                Rescan(EmbeddingChoices.Where(c => c.IsChecked).Select(c => c.Name).ToList());
+                Rescan(EmbeddingChoices.ToDictionary(c => c.Name, c => c.Use, StringComparer.OrdinalIgnoreCase));
                 Raise(nameof(EffectiveStoreRoot));
             }
         }
@@ -93,8 +93,24 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     /// <summary>What is in <c>&lt;root&gt;/embeddings</c>, each with a checkbox.</summary>
     public ObservableCollection<EmbeddingChoice> EmbeddingChoices { get; } = [];
 
+    private static Dictionary<string, EmbeddingUse> UsesOf(RefineSettings refine)
+    {
+        var uses = new Dictionary<string, EmbeddingUse>(StringComparer.OrdinalIgnoreCase);
+        foreach (var name in refine.Embeddings)
+        {
+            uses[name] = EmbeddingUse.Positive;
+        }
+
+        foreach (var name in refine.NegativeEmbeddings)
+        {
+            uses[name] = EmbeddingUse.Negative;
+        }
+
+        return uses;
+    }
+
     /// <summary>Re-reads the three folders under the current root, keeping what was selected if it still exists.</summary>
-    private void Rescan(IReadOnlyList<string> checkedEmbeddings)
+    private void Rescan(Dictionary<string, EmbeddingUse> uses)
     {
         var root = StoreRoot;
 
@@ -102,7 +118,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         Refill(DiffusionModels, [NONE, .. _store.DiffusionModels(root)]);
         Refill(Loras, [NONE, .. _store.Loras(root)]);
         var embeddings = _store.Embeddings(root)
-            .Select(name => new EmbeddingChoice(name, checkedEmbeddings.Contains(name)))
+            .Select(name => new EmbeddingChoice(name, uses.TryGetValue(name, out var use) ? use : EmbeddingUse.Unused))
             .ToList();
         EmbeddingChoices.Clear();
         foreach (var choice in embeddings)
@@ -338,7 +354,8 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
                 Strength = RefineStrength,
                 Model = RefineModel == NONE ? string.Empty : RefineModel,
                 Lora = RefineLora == NONE ? string.Empty : RefineLora,
-                Embeddings = EmbeddingChoices.Where(c => c.IsChecked).Select(c => c.Name).ToList(),
+                Embeddings = EmbeddingChoices.Where(c => c.Use == EmbeddingUse.Positive).Select(c => c.Name).ToList(),
+                NegativeEmbeddings = EmbeddingChoices.Where(c => c.Use == EmbeddingUse.Negative).Select(c => c.Name).ToList(),
                 Steps = RefineSteps,
                 StoreRoot = StoreRoot.Trim(),
             },
@@ -377,9 +394,10 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         RefineModel = string.IsNullOrEmpty(settings.Restoration.Refine.Model) ? NONE : settings.Restoration.Refine.Model;
         RefineLora = string.IsNullOrEmpty(settings.Restoration.Refine.Lora) ? NONE : settings.Restoration.Refine.Lora;
         RefineSteps = settings.Restoration.Refine.Steps;
+        var uses = UsesOf(settings.Restoration.Refine);
         foreach (var choice in EmbeddingChoices)
         {
-            choice.IsChecked = settings.Restoration.Refine.Embeddings.Contains(choice.Name);
+            choice.Use = uses.TryGetValue(choice.Name, out var use) ? use : EmbeddingUse.Unused;
         }
     }
 
@@ -398,28 +416,47 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     private void Raise(string? name) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 }
 
-/// <summary>One embedding file and whether it is selected.</summary>
-public sealed class EmbeddingChoice(string name, bool isChecked) : INotifyPropertyChanged
+/// <summary>Where an embedding's token goes. Its file name is its token; there is no text to type.</summary>
+public enum EmbeddingUse
 {
-    private bool _isChecked = isChecked;
+    /// <summary>Loaded for nothing; not in either prompt.</summary>
+    Unused,
+
+    /// <summary>Its token is in the positive prompt.</summary>
+    Positive,
+
+    /// <summary>Its token is in the negative prompt — quality suppressors like EasyNegative.</summary>
+    Negative,
+}
+
+/// <summary>One embedding file and how it is used.</summary>
+public sealed class EmbeddingChoice(string name, EmbeddingUse use) : INotifyPropertyChanged
+{
+    private EmbeddingUse _use = use;
 
     /// <inheritdoc />
     public event PropertyChangedEventHandler? PropertyChanged;
 
-    /// <summary>The file name without extension.</summary>
+    /// <summary>The three uses, for the combo box.</summary>
+    public static IReadOnlyList<EmbeddingUse> Uses { get; } = Enum.GetValues<EmbeddingUse>();
+
+    /// <summary>The file name without extension — and the token.</summary>
     public string Name { get; } = name;
 
-    /// <summary>Whether it is selected.</summary>
-    public bool IsChecked
+    /// <summary>How it is used.</summary>
+    public EmbeddingUse Use
     {
-        get => _isChecked;
+        get => _use;
         set
         {
-            if (_isChecked != value)
+            if (_use != value)
             {
-                _isChecked = value;
-                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsChecked)));
+                _use = value;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Use)));
             }
         }
     }
+
+    /// <summary>Kept for callers that only ask "is it in play at all".</summary>
+    public bool IsChecked => Use != EmbeddingUse.Unused;
 }

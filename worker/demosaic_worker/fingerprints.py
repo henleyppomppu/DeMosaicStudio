@@ -55,6 +55,7 @@ _FIELDS: Final[dict[Scope, tuple[tuple[str, str], ...]]] = {
         ("refine.embeddings", "list"),
         ("refine.lora", "str"),
         ("refine.model", "str"),
+        ("refine.negativeEmbeddings", "list"),
         ("refine.seed", "int"),
         ("refine.steps", "int"),
         ("refine.strength", "num"),
@@ -73,7 +74,8 @@ _FIELDS: Final[dict[Scope, tuple[tuple[str, str], ...]]] = {
 
 #: What an absent `restoration.refine` key means, matching RefineSettings' defaults.
 _REFINE_DEFAULTS: Final[dict[str, Any]] = {
-    "enabled": False, "embeddings": [], "lora": "", "model": "", "seed": 7, "steps": 8, "strength": 0.2,
+    "enabled": False, "embeddings": [], "lora": "", "model": "", "negativeEmbeddings": [], "seed": 7,
+    "steps": 8, "strength": 0.2,
 }
 
 

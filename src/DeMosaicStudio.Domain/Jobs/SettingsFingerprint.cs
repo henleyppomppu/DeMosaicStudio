@@ -97,6 +97,7 @@ public static class SettingsFingerprint
         new("refine.embeddings", string.Join(";", r.Refine.Embeddings.Order(StringComparer.Ordinal))),
         new("refine.lora", r.Refine.Lora ?? string.Empty),
         new("refine.model", r.Refine.Model ?? string.Empty),
+        new("refine.negativeEmbeddings", string.Join(";", r.Refine.NegativeEmbeddings.Order(StringComparer.Ordinal))),
         new("refine.seed", Int(r.Refine.Seed)),
         new("refine.steps", Int(r.Refine.Steps)),
         new("refine.strength", Num(r.Refine.Strength)),

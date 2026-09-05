@@ -253,6 +253,8 @@ public static class WorkerCodec
                 ["lora"] = string.IsNullOrEmpty(settings.Restoration.Refine.Lora) ? null : settings.Restoration.Refine.Lora,
                 ["embeddings"] = new JsonArray(
                     settings.Restoration.Refine.Embeddings.Select(e => (JsonNode?)JsonValue.Create(e)).ToArray()),
+                ["negativeEmbeddings"] = new JsonArray(
+                    settings.Restoration.Refine.NegativeEmbeddings.Select(e => (JsonNode?)JsonValue.Create(e)).ToArray()),
                 ["steps"] = settings.Restoration.Refine.Steps,
                 ["seed"] = settings.Restoration.Refine.Seed,
                 ["storeRoot"] = string.IsNullOrWhiteSpace(settings.Restoration.Refine.StoreRoot)

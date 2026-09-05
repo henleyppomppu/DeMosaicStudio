@@ -184,12 +184,17 @@
                     <ItemsControl ItemsSource="{Binding EmbeddingChoices}" IsEnabled="{Binding RefineEnabled}" Margin="0,0,0,4">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <CheckBox Content="{Binding Name}" IsChecked="{Binding IsChecked}" />
+                                <DockPanel Margin="0,2">
+                                    <ComboBox DockPanel.Dock="Right" Width="90"
+                                              ItemsSource="{x:Static vm:EmbeddingChoice.Uses}"
+                                              SelectedItem="{Binding Use}" />
+                                    <TextBlock Text="{Binding Name}" VerticalAlignment="Center" />
+                                </DockPanel>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
                     <TextBlock Style="{StaticResource Hint}"
-                               Text="특정 인물을 재현하도록 학습된 임베딩이나 LoRA는 이 프로그램의 범위 밖입니다(§2.3 C-4). 프로그램은 구분할 수 없고, 고르는 사람은 할 수 있습니다." />
+                               Text="임베딩의 파일 이름이 곧 토큰입니다. Positive면 그 토큰이 긍정 프롬프트에, Negative면 부정 프롬프트에 들어갑니다 — 프롬프트는 고른 토큰만으로 조립되고 글자를 칠 수 있는 칸은 어디에도 없습니다(§2.3 C-4). EasyNegative 같은 품질 억제 임베딩은 Negative에 두세요. 특정 인물을 재현하도록 학습된 임베딩이나 LoRA는 이 프로그램의 범위 밖입니다. 프로그램은 구분할 수 없고, 고르는 사람은 할 수 있습니다." />
 
                     <TextBlock Style="{StaticResource Label}" Text="강도" />
                     <DockPanel IsEnabled="{Binding RefineEnabled}">
