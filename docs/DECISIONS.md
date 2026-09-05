@@ -1688,3 +1688,69 @@ knowingly. The parity fixture was regenerated from the Python side and the C# si
   detail until the user runs `fetch_restorer.py`.
 - Every profile number above is one clip on one machine. `scripts/profile_job.py` and
   `scripts/bench_throughput.py` are how the next claim gets checked.
+
+---
+
+## D-44 — A diffusion refiner at low strength is the first restorer to beat bicubic perceptually
+
+**Status:** measured, not yet shipped (2026-08-23) · **Phase 0 of** a user-chosen diffusion model behind the single-frame path
+
+### Context
+
+The user asked whether a generative model could paint the region ("LLM으로 그려야 할 듯"). An
+LLM cannot; a diffusion model can, and the question is whether it *should* — every pixel it
+produces is invented, and D-43 had just measured a learned prior (a compact SR network) making
+things worse than bicubic on this footage. The mosaicked regions are, per the user, almost never
+faces; §2.3 C-3 and C-4 still apply and shaped the experiment: **no prompt**, no reference, a
+user-chosen model fetched from Hugging Face by the user, nothing bundled.
+
+### Setup
+
+`scripts/fetch_diffusion.py` (repo id → `models/diffusion/<name>/`, fp16 files only, file list
+discovered from the hub, hashes recorded; the same code the application will use) and
+`scripts/diffusion_probe.py`: the quality fixture's region, bicubic result as the init image,
+SD1.5 + LCM-LoRA img2img, fixed seed, empty prompt, per-strength PSNR/LPIPS against the clean
+frame, flicker as mean LPIPS between consecutive outputs, seconds per region.
+
+### The first run was my probe's fault, not the model's
+
+A 209×169 crop fed straight in came back as coloured blobs: PSNR 16.4, worse than the mosaic.
+SD1.5 was trained at 512 and does not work far below it. And with four LCM steps, strengths 0.5
+and 0.7 both rounded to two steps and produced *identical* output — a tell that the strength
+axis was not being sampled at all. Both fixed: the crop is upscaled by an integer factor to about
+512 on the long side and brought back after; eight steps so 0.2/0.35/0.5 are distinct.
+
+### Measured, fairly
+
+| | PSNR | LPIPS | flicker | s/region |
+| --- | ---: | ---: | ---: | ---: |
+| input (mosaic) | 26.69 | 0.444 | 0.032 | — |
+| bicubic (Fast) | **29.79** | 0.161 | **0.018** | 0.001 |
+| **diffusion s=0.2** | 28.12 | **0.092** | 0.029 | 0.13 |
+| diffusion s=0.3 | 27.49 | 0.102 | 0.035 | 0.17 |
+| diffusion s=0.5 | 25.13 | 0.157 | 0.061 | 0.25 |
+| real motion alone (clean, consecutive) | | | 0.054 | |
+
+- **s=0.2 is the first restorer in this project to beat bicubic on LPIPS**, by 43%, at the PSNR
+  cost an inventing restorer is expected to pay (−1.7 dB) and with flicker below what real motion
+  costs on its own. To the eye it is bicubic without the plastic smoothness.
+- s=0.3 begins to grow shapes that are not there; s=0.5 is invention with a vignette.
+- A generic prompt (`"photo"`) changes nothing (0.0917 vs 0.0920), so the prompt stays empty —
+  which is also how C-4 is satisfied by construction.
+- 130 ms per region on the 3080 Ti: at one region a frame the Fast path's 4.25 fps becomes about
+  2.9. VRAM 2.2 GB on top of the detector's 3.
+
+### What this does not say
+
+One synthetic clip of blurry CG, twenty-four frames. The gain is perceptual, modest to the eye,
+and the content is exactly the kind a generative prior should struggle with — so a photographic
+source may do much better or much worse. D-36's limitation applies. The probe also composites
+with a hard mask; the worker's feather would remove the elliptical edge visible in the strip.
+
+### Decision
+
+Worth a Phase 1: the diffusion step as a **refiner on top of Fast** — bicubic init, user-chosen
+model and optional LoRA/embeddings from the store, strength as the one exposed knob (default
+0.2), no prompt field — rather than a fourth preset, because that is what it is. The model
+manager (a Hugging Face repo id in settings, fetched by the application with progress) is the
+larger part of that work and is not started until the user says so.

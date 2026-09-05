@@ -506,3 +506,6 @@ models/**/*.pt
 
 # Job outputs and scratch renders.
 artifacts/
+
+# Diffusion models and LoRAs the user fetches (scripts/fetch_diffusion.py). Never committed.
+models/diffusion/
