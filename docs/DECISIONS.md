@@ -1832,6 +1832,22 @@ which barely matters when there is almost no denoising left to do. So the role s
 as the mechanism by which an embedding *can* act — the honest one, with no text field — but
 no embedding is recommended, and the dialog says so.
 
+**And it does not get better with strength** (same day, asked for 0.4–0.5, same setup):
+
+| | PSNR | LPIPS | flicker | mean change from the embedding |
+| --- | ---: | ---: | ---: | ---: |
+| s=0.2 none / EasyNegative | 27.52 / 27.50 | 0.1412 / 0.1414 | 0.0207 / 0.0209 | 0.27 /255 |
+| s=0.4 none / EasyNegative | 25.63 / 25.53 | 0.1650 / 0.1676 | 0.0357 / 0.0434 | 1.11 /255 |
+| s=0.5 none / EasyNegative | 23.89 / 23.82 | 0.2179 / 0.2203 | 0.0616 / 0.0706 | 2.68 /255 |
+
+The embedding's influence grows with strength as expected, and every time it is measurable it
+is *worse* on all three metrics, flicker most (+22% at 0.4, +15% at 0.5). Strength itself is
+the larger story: above 0.2 the refiner loses to bicubic on LPIPS (0.165 at 0.4 vs 0.161) and
+the contact sheet shows why — at 0.4 and 0.5 the model draws striped texture that is in
+neither the input nor the clean frame. EasyNegative was trained against anime-style defects
+and has no opinion about invented stripes. The 0.2 default stands; the embedding role
+selector stays as the honest mechanism, with nothing recommended.
+
 Two smaller facts from the same run. With no tokens the conditional and unconditional
 embeddings are identical, so classifier-free guidance cancels exactly and the shipped 1.5
 does nothing except run the UNet on a doubled batch: guidance 1.0 was 7% faster with a
