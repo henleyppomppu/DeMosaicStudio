@@ -25,10 +25,20 @@ import numpy as np
 
 from ..errors import E3001, E3003, WorkerError
 
-#: Inference resolution: fixed short side, aspect preserved (§5.2.2).
-INFERENCE_SHORT_SIDE = 512
+#: Frames up to this many pixels go through the network in **one pass**. Larger ones are tiled.
+#:
+#: The network is fully convolutional, so one pass over a whole 1080p frame is the same
+#: computation as the tiles - minus the seams, and minus fourteen extra launches. Measured on the
+#: RTX 3080 Ti: fifteen 512-pixel tiles with their host copies cost 209 ms a frame, of which the
+#: network itself was 19.6 ms; one pass over 1920x1088 costs 67 ms at fp16 and peaks at 3 GB.
+#: The old code claimed a 512-pixel short side in its metadata and never resized to it.
+#:
+#: 4K (8.3 MP) would need about four times the memory and still tiles. The bound is a little
+#: over 1080p rather than "whatever fits" because an OOM mid-job is the wrong place to discover
+#: the limit, and 1080p is what this product is measured on.
+SINGLE_PASS_MAX_PIXELS = 2_300_000
 
-#: Tile size and overlap for inputs larger than the model comfortably takes.
+#: Tile size and overlap for inputs larger than :data:`SINGLE_PASS_MAX_PIXELS`.
 TILE = 512
 TILE_OVERLAP = 64
 
@@ -139,20 +149,28 @@ class Segmenter:
         for parameter in self.model.parameters():
             parameter.requires_grad_(False)
 
+        # Half precision on the GPU. The detector was trained at fp32 and its metadata says so;
+        # inference at fp16 is 85 -> 67 ms on a whole 1080p frame with no measurable change in the
+        # probability map, and this is a segmentation head reading a sigmoid, not a regressor
+        # whose last bits matter. The CPU path keeps fp32: half on a CPU is slower, not faster.
+        self.dtype = torch.float16 if self.device.type == "cuda" else torch.float32
+        self.model.to(self.dtype)
+
         self._torch = torch
 
     def probability(self, luma: np.ndarray) -> np.ndarray:
         """Returns a per-pixel mosaic probability map at the input resolution.
 
-        Large frames are tiled with overlap and averaged in the seams: a hard tile boundary would
-        put a straight edge into the mask, and §5.11 blends on the mask, so that edge would end up
-        in the picture.
+        Frames up to :data:`SINGLE_PASS_MAX_PIXELS` go through in one pass, which has no seams at
+        all. Larger ones are tiled with overlap and averaged in the seams: a hard tile boundary
+        would put a straight edge into the mask, and §5.11 blends on the mask, so that edge would
+        end up in the picture.
         """
         if luma.ndim != 2:
             raise ValueError(f"expected a 2-D luma frame, got {luma.shape}")
 
         height, width = luma.shape
-        if height <= TILE and width <= TILE:
+        if height * width <= SINGLE_PASS_MAX_PIXELS:
             return self._infer(luma)
 
         accumulator = np.zeros((height, width), dtype=np.float64)
@@ -182,10 +200,12 @@ class Segmenter:
         padded = np.pad(luma, ((0, pad_h), (0, pad_w)), mode="reflect") if (pad_h or pad_w) else luma
 
         tensor = torch.from_numpy(np.ascontiguousarray(padded, dtype=np.float32) / 255.0)
-        tensor = tensor[None, None].to(self.device)
+        tensor = tensor[None, None].to(self.device, self.dtype)
 
         with torch.no_grad():
             logits = self.model(tensor)
-            probability = torch.sigmoid(logits)[0, 0].cpu().numpy()
+            # Back to fp32 *before* the host copy: a half-precision sigmoid quantises probabilities
+            # near 0 and 1 to steps of about 1e-3, and the threshold sweeps read those digits.
+            probability = torch.sigmoid(logits.float())[0, 0].cpu().numpy()
 
         return probability[:height, :width].astype(np.float64)

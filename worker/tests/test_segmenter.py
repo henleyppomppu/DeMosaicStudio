@@ -90,17 +90,63 @@ def test_probabilities_are_bounded(tmp_path: Path) -> None:
     assert probability.max() <= 1.0
 
 
-def test_a_frame_larger_than_a_tile_is_tiled(tmp_path: Path) -> None:
-    """The seams are averaged: a hard tile boundary puts a straight edge into the mask, and §5.11
-    blends on the mask, so that edge would reach the picture."""
-    segmenter = Segmenter(_write_model(tmp_path / "m"), device="cpu")
-    rng = np.random.default_rng(1)
+def test_a_1080p_frame_goes_through_in_one_pass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fifteen tiles cost 209 ms a frame of which the network was 19.6 ms; one pass is 67 ms.
 
-    frame = rng.integers(0, 256, (700, 900)).astype(np.float64)
+    The network is fully convolutional, so the single pass is the same computation minus the seams.
+    This pins the *count*: a regression back to tiling would keep every other test green.
+    """
+    segmenter = Segmenter(_write_model(tmp_path / "m"), device="cpu")
+    calls: list[tuple[int, int]] = []
+    real = segmenter._infer
+    monkeypatch.setattr(segmenter, "_infer", lambda luma: calls.append(luma.shape) or real(luma))
+
+    frame = np.random.default_rng(1).integers(0, 256, (1080, 1920)).astype(np.float64)
     probability = segmenter.probability(frame)
 
+    assert calls == [(1080, 1920)]
     assert probability.shape == frame.shape
     assert np.isfinite(probability).all()
+
+
+def test_a_frame_beyond_the_single_pass_bound_is_tiled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """4K is four times the pixels and would need four times the memory. The seams are averaged: a
+    hard tile boundary puts a straight edge into the mask, and section 5.11 blends on the mask."""
+    from demosaic_worker.detect import segmenter as module
+
+    # Lower the bound rather than allocate a 4K frame on a CPU test: the rule is the same.
+    monkeypatch.setattr(module, "SINGLE_PASS_MAX_PIXELS", 500 * 500)
+    segmenter = Segmenter(_write_model(tmp_path / "m"), device="cpu")
+    calls: list[tuple[int, int]] = []
+    real = segmenter._infer
+    monkeypatch.setattr(segmenter, "_infer", lambda luma: calls.append(luma.shape) or real(luma))
+
+    frame = np.random.default_rng(1).integers(0, 256, (700, 900)).astype(np.float64)
+    probability = segmenter.probability(frame)
+
+    assert len(calls) > 1
+    assert all(h <= module.TILE and w <= module.TILE for h, w in calls)
+    assert probability.shape == frame.shape
+    assert np.isfinite(probability).all()
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="fp16 is the CUDA path")
+def test_half_precision_on_the_gpu_reads_the_same_map_as_fp32(tmp_path: Path) -> None:
+    """The detector is a sigmoid head; the last bits of fp32 are not where its answer lives."""
+    frame = np.random.default_rng(3).integers(0, 256, (256, 320)).astype(np.float64)
+    # Written once: `_write_model` initialises a fresh random network each call, and comparing two
+    # different networks measured 0.53 where the precision difference is 0.001.
+    model = _write_model(tmp_path / "m")
+
+    on_cpu = Segmenter(model, device="cpu").probability(frame)
+    on_gpu = Segmenter(model, device="cuda")
+    assert on_gpu.dtype == torch.float16
+
+    assert np.abs(on_gpu.probability(frame) - on_cpu).max() < 0.02
 
 
 def test_a_non_2d_frame_is_rejected(tmp_path: Path) -> None:
