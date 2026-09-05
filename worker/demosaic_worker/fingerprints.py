@@ -32,6 +32,10 @@ class Scope(str, Enum):
 _FIELDS: Final[dict[Scope, tuple[tuple[str, str], ...]]] = {
     Scope.DETECTION: (
         ("confidence", "num"),
+        # How often the detector runs. In the fingerprint because it changes which frames have
+        # detections and therefore the output; adding it invalidated every cached detection once,
+        # which is the price of a fingerprinted key and was paid knowingly (D-43).
+        ("detectEvery", "int"),
         ("maskThreshold", "num"),
         ("maxMissingFrames", "int"),
         ("minConfirmFrames", "int"),
@@ -44,6 +48,8 @@ _FIELDS: Final[dict[Scope, tuple[tuple[str, str], ...]]] = {
         ("minRestorationConfidence", "num"),
         ("paddingRatio", "num"),
         ("preset", "str"),
+        # The blend weight of the single-frame path's temporal smoother (D-43).
+        ("temporalAlpha", "num"),
         # The *requested* value, never the per-frame resolved K (§5.6.1, §9.3).
         ("temporalWindow", "str"),
     ),

@@ -83,6 +83,16 @@
                     </DockPanel>
                     <TextBlock Style="{StaticResource Hint}"
                                Text="탐지가 잠깐 끊겨도 추적을 몇 프레임까지 이어갈지." />
+
+                    <TextBlock Style="{StaticResource Label}" Text="탐지 주기 (프레임)" />
+                    <DockPanel>
+                        <TextBlock DockPanel.Dock="Right" Width="46" TextAlignment="Right"
+                                   Text="{Binding DetectEvery}" />
+                        <Slider Minimum="1" Maximum="8" TickFrequency="1"
+                                Value="{Binding DetectEvery}" />
+                    </DockPanel>
+                    <TextBlock Style="{StaticResource Hint}"
+                               Text="몇 프레임마다 탐지기를 돌릴지. 사이 프레임은 추적기가 영역을 예측해 이어갑니다. 복원이 빨라진 뒤로는 탐지기가 프레임당 가장 큰 고정비용이라, 2로 두면 전체가 약 1.4배 빨라집니다. 새 영역은 최대 그만큼 늦게 잡힙니다." />
                 </StackPanel>
             </TabItem>
 
@@ -92,7 +102,7 @@
                     <ComboBox ItemsSource="{x:Static vm:SettingsViewModel.Presets}"
                               SelectedItem="{Binding Preset}" Margin="0,0,0,4" />
                     <TextBlock Style="{StaticResource Hint}"
-                               Text="처리 속도와 시간 문맥의 크기를 맞바꿉니다. Fast · Balanced · Quality 순으로 느려지고 좋아집니다." />
+                               Text="Fast: 격자를 지우고 부드럽게만 (모델 없음, 가장 빠름). Balanced: 초해상도 망으로 질감을 만들어 넣고 프레임 사이를 섞음 — 모든 화소가 추정입니다. Quality: 이웃 프레임에서 근거를 모으는 방식, 약 20배 느림." />
 
                     <TextBlock Style="{StaticResource Label}" Text="시간 창" />
                     <ComboBox ItemsSource="{x:Static vm:SettingsViewModel.TemporalWindows}"
@@ -129,6 +139,16 @@
                     </DockPanel>
                     <TextBlock Style="{StaticResource Hint}"
                                Text="복원한 영역을 주변에 얼마나 넓게 섞어 넣을지." />
+
+                    <TextBlock Style="{StaticResource Label}" Text="시간 혼합 (새 프레임 비중)" />
+                    <DockPanel>
+                        <TextBlock DockPanel.Dock="Right" Width="46" TextAlignment="Right"
+                                   Text="{Binding TemporalAlpha, StringFormat=F2}" />
+                        <Slider Minimum="0" Maximum="1" TickFrequency="0.05"
+                                Value="{Binding TemporalAlpha}" />
+                    </DockPanel>
+                    <TextBlock Style="{StaticResource Hint}"
+                               Text="Fast·Balanced에서 이번 프레임의 복원 결과를 이전 결과와 섞는 비율. 0.3이면 7:3입니다. 낮출수록 깜빡임이 줄고 움직임이 번집니다. Quality에서는 무시됩니다." />
                 </StackPanel>
             </TabItem>
 

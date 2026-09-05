@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 import os
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -33,12 +33,14 @@ from .errors import (
     E1001,
     E3001,
     E3002,
+    E4001,
     E4002,
     E7006,
     W3101,
     W4102,
     W4103,
     W5102,
+    W6101,
     WorkerError,
 )
 from .media.probe import probe as probe_media
@@ -56,7 +58,9 @@ from .post.blend import TemporalAlpha, blend_region
 from .protocol import Stage
 from .roi import build_roi
 from .restore.accumulator import EvidenceAccumulator
-from .scene.cuts import detect_cuts, same_scene_span
+from .restore.temporal import DEFAULT_ALPHA, TemporalSmoother
+from .restore.upscale import RESTORER_ID, Upscaler, bicubic_restore
+from .scene.cuts import SceneChange, classify_pair, same_scene_span
 from .track.tracker import Track, Tracker
 
 REPO = Path(__file__).resolve().parent.parent.parent
@@ -330,6 +334,25 @@ class JobRunner:
         )
         temporal_alpha = TemporalAlpha()
 
+        # D-43: the preset chooses the restorer, and for the first time it chooses something -
+        # D-31 measured Fast, Balanced and Quality producing identical output.
+        #
+        #   Fast      decimate + bicubic. No network. Removes the grid, leaves blur, ~1 ms.
+        #   Balanced  decimate + compact SR network, every region in one batch, + temporal blend.
+        #             Invents detail. Falls back to Fast with W6101 when no weights are installed.
+        #   Quality   the evidence accumulator (D-28): optical flow + fold. The only path that
+        #             uses neighbouring frames, and about 20x slower for it.
+        backend = self._backend_for(preset, emitter)
+        temporal = TemporalSmoother(
+            alpha=float(_setting(settings, "restoration", "temporalAlpha", default=DEFAULT_ALPHA))
+        )
+        # Run the detector on every Nth frame and let the tracker carry regions between. The
+        # detector is the largest fixed cost per frame once restoration is cheap (67 ms of a
+        # ~90 ms frame at 1080p), and mosaic regions do not appear and vanish between adjacent
+        # frames. `minConfirmFrames` already delays the first restoration by two frames, so a
+        # region found one frame late costs nothing the pipeline was not already spending.
+        detect_every = max(1, int(_setting(settings, "detection", "detectEvery", default=1)))
+
         emitter.progress(context.job_id, Stage.PROBING, 0.0, force=True)
         info = probe_media(source)
         total = int((info.duration_seconds or 0) * float(info.nominal_fps or 24)) or None
@@ -351,6 +374,15 @@ class JobRunner:
         # with oracle alignment, modelling it is worth +1.0 to +4.4 dB against the mosaicked input,
         # where modelling every pixel as block-averaged was worth nothing at all.
         mask_history: list[np.ndarray] = []
+        # Scene boundaries inside `history`, kept in step with it. One new pair is classified per
+        # frame; re-running `detect_cuts` over the whole buffer every frame classified seven pairs
+        # at full resolution each time and cost 268 ms a frame - a quarter of the budget, for a
+        # result that had not changed since the previous frame.
+        changes: list[SceneChange] = []
+        # The previous frame's luma as the decoder gave it. The scene-cut histogram wants integers
+        # and the detector wants an upload; both were being handed the float64 copy and spending
+        # more time converting it back than doing their job.
+        previous_plane: list[np.ndarray] = []
         anchor_history: dict[int, list[AnchorObservation]] = {}
         started = time.time()
 
@@ -412,9 +444,13 @@ class JobRunner:
             # Working on the luma plane and leaving chroma alone round-trips losslessly.
             planes = frame.to_ndarray(format="yuv420p")
             plane_height = frame.height
-            luma = planes[:plane_height].astype(np.float64)
+            plane = planes[:plane_height]
+            luma = plane.astype(np.float64)
 
             history.append(luma)
+            if previous_plane:
+                changes.append(classify_pair(previous_plane[0], plane, len(history) - 1))
+            previous_plane[:] = [plane]
             # The slot is reserved now and filled once detection has run. Appending the mask where
             # it is computed would desynchronise the two lists on every early return - a detector
             # failure, or a frame with no region - and a neighbour would then be paired with some
@@ -423,28 +459,38 @@ class JobRunner:
             if len(history) > 2 * radius + 1:
                 history.pop(0)
                 mask_history.pop(0)
+                # The boundary before the frame that just left goes with it; the rest slide down.
+                changes[:] = [replace(c, index=c.index - 1) for c in changes if c.index > 1]
 
-            try:
-                probability = self._segment(luma, settings)
-            except WorkerError:
-                raise
-            except Exception as exc:  # noqa: BLE001 - one frame failing is not the job failing
-                emitter.warn(E3002, f"detector failed on frame {index}: {exc}")
-                context.frames_passed_through += 1
-                context.note_route("DetectorFailed")
-                return None
+            if index % detect_every == 0:
+                try:
+                    probability = self._segment(plane, settings)
+                except WorkerError:
+                    raise
+                except Exception as exc:  # noqa: BLE001 - one frame failing is not the job failing
+                    emitter.warn(E3002, f"detector failed on frame {index}: {exc}")
+                    context.frames_passed_through += 1
+                    context.note_route("DetectorFailed")
+                    return None
 
-            regions, clamped = extract_regions(
-                probability, threshold=mask_threshold, min_area=min_region_area
-            )
-            if clamped:
-                emitter.warn(W3101, "region count clamped", frame=index)
+                regions, clamped = extract_regions(
+                    probability, threshold=mask_threshold, min_area=min_region_area
+                )
+                if clamped:
+                    emitter.warn(W3101, "region count clamped", frame=index)
 
-            for found in regions:
-                mask_history[-1] |= found.mask
+                for found in regions:
+                    mask_history[-1] |= found.mask
 
-            context.regions_detected += len(regions)
-            tracks = tracker.update(regions)
+                context.regions_detected += len(regions)
+                tracks = tracker.update(regions)
+            else:
+                # Nobody looked at this frame. The tracker moves each region where its motion
+                # model predicts, and the frame's mask is the union of what it is carrying.
+                tracks = tracker.coast()
+                for carried in tracks:
+                    if carried.region is not None:
+                        mask_history[-1] |= carried.region.mask
 
             restorable = [t for t in tracks if t.is_restorable and t.region is not None]
 
@@ -461,7 +507,6 @@ class JobRunner:
                 context.note_route("AnalyzedOnly")
                 return None
 
-            changes = detect_cuts(history) if len(history) > 1 else []
             target_index = len(history) - 1
             scene_start, scene_end = same_scene_span(
                 changes, target_index, radius, total_frames=len(history)
@@ -471,14 +516,37 @@ class JobRunner:
             output = luma.copy()
             touched = False
 
-            for track in restorable:
-                outcome = self._restore_track(
-                    track=track,
+            if backend == "evidence":
+                outcomes = [
+                    (track, self._restore_track(
+                        track=track,
+                        luma=luma,
+                        history=history,
+                        mask_history=mask_history,
+                        frame_index=index,
+                        target_index=target_index,
+                        anchor_history=anchor_history,
+                        same_scene=same_scene,
+                        preset=preset,
+                        window_setting=window_setting,
+                        min_region_area=min_region_area,
+                        align_conf_min=align_conf_min,
+                        gate=gate,
+                        smoother=smoother,
+                        accumulator=accumulator,
+                        emitter=emitter,
+                        context=context,
+                    ))
+                    for track in restorable
+                ]
+            else:
+                outcomes = self._restore_single_frame(
+                    restorable,
                     luma=luma,
-                    history=history,
-                    mask_history=mask_history,
+                    backend=backend,
+                    temporal=temporal,
                     frame_index=index,
-                    target_index=target_index,
+                    history_length=len(history),
                     anchor_history=anchor_history,
                     same_scene=same_scene,
                     preset=preset,
@@ -487,11 +555,11 @@ class JobRunner:
                     align_conf_min=align_conf_min,
                     gate=gate,
                     smoother=smoother,
-                    accumulator=accumulator,
                     emitter=emitter,
                     context=context,
                 )
 
+            for track, outcome in outcomes:
                 context.note_route(outcome.decision.reason.value)
 
                 if outcome.decision.path is RestorationPath.PASS_THROUGH or outcome.restored is None:
@@ -672,37 +740,12 @@ class JobRunner:
         full frame size costs more than ten times what the job needs and spends VRAM on pixels that
         are discarded — an earlier version did exactly that and a 96-frame clip did not finish.
         """
-        region: Region = track.region  # type: ignore[assignment]
-        left, top, right, bottom = region.box
-
-        patch = luma[top:bottom, left:right]
-        if patch.size == 0:
+        located = self._locate_track(track, luma, anchor_history)
+        if located is None:
             return TrackOutcome(route(RouteInputs(has_region=False)), None, 0.0, None, MosaicProfile())
-
-        profile, _ = estimate_geometry(patch)
-
-        observations = anchor_history.setdefault(track.track_id, [])
-        observations.append(
-            AnchorObservation(
-                box_origin=(left, top),
-                phase=(profile.grid_offset_x, profile.grid_offset_y),
-            )
-        )
-        anchor, anchor_confidence = estimate_anchor(
-            observations, (profile.block_width, profile.block_height)
-        )
-        profile = MosaicProfile(
-            kind=profile.kind,
-            block_width=profile.block_width,
-            block_height=profile.block_height,
-            grid_offset_x=profile.grid_offset_x,
-            grid_offset_y=profile.grid_offset_y,
-            anchor=anchor,
-            anchor_confidence=anchor_confidence,
-            confidence=profile.confidence,
-        )
-
-        roi = build_roi(region.box, luma.shape, block_size=profile.block_size)
+        region, profile, roi = located
+        left, top, right, bottom = region.box
+        anchor = profile.anchor
 
         window = decide_window(
             setting=window_setting,
@@ -863,6 +906,195 @@ class JobRunner:
         return TrackOutcome(
             decision, trimmed, confidence, roi, profile, mean_alignment, evidence
         )
+
+
+    def _locate_track(
+        self,
+        track: Track,
+        luma: np.ndarray,
+        anchor_history: dict[int, list[AnchorObservation]],
+    ) -> tuple[Region, MosaicProfile, Any] | None:
+        """Where a track is on this frame and what its mosaic looks like: region, profile, ROI.
+
+        Shared by every restoration path. The grid geometry, the anchoring estimate and the padded
+        ROI are the same whether the pixels are then folded from neighbours or upscaled from this
+        frame alone. ``None`` when the region has no pixels.
+        """
+        region: Region = track.region  # type: ignore[assignment]
+        left, top, right, bottom = region.box
+
+        patch = luma[top:bottom, left:right]
+        if patch.size == 0:
+            return None
+
+        profile, _ = estimate_geometry(patch)
+
+        observations = anchor_history.setdefault(track.track_id, [])
+        observations.append(
+            AnchorObservation(
+                box_origin=(left, top),
+                phase=(profile.grid_offset_x, profile.grid_offset_y),
+            )
+        )
+        anchor, anchor_confidence = estimate_anchor(
+            observations, (profile.block_width, profile.block_height)
+        )
+        profile = MosaicProfile(
+            kind=profile.kind,
+            block_width=profile.block_width,
+            block_height=profile.block_height,
+            grid_offset_x=profile.grid_offset_x,
+            grid_offset_y=profile.grid_offset_y,
+            anchor=anchor,
+            anchor_confidence=anchor_confidence,
+            confidence=profile.confidence,
+        )
+
+        roi = build_roi(region.box, luma.shape, block_size=profile.block_size)
+        return region, profile, roi
+
+    def _backend_for(self, preset: QualityPreset, emitter: Emitter) -> Any:
+        """The restorer the preset asks for. See the table where this is called."""
+        if preset is QualityPreset.QUALITY:
+            return "evidence"
+        if preset is QualityPreset.FAST:
+            return "bicubic"
+
+        try:
+            return Upscaler(MODELS / "restorer" / RESTORER_ID)
+        except WorkerError as error:
+            if error.code is not E4001:
+                raise
+            # The network is optional; the floor is not. Saying so is the point of the warning -
+            # the earlier defect here was a summary that claimed a backend it had not used.
+            emitter.warn(
+                W6101,
+                f"restorer {RESTORER_ID} unavailable ({error}); using bicubic upscaling instead",
+            )
+            return "bicubic"
+
+    def _restore_single_frame(
+        self,
+        tracks: list[Track],
+        *,
+        luma: np.ndarray,
+        backend: Any,
+        temporal: TemporalSmoother,
+        frame_index: int,
+        history_length: int,
+        anchor_history: dict[int, list[AnchorObservation]],
+        same_scene: int,
+        preset: QualityPreset,
+        window_setting: int | None,
+        min_region_area: int,
+        align_conf_min: float,
+        gate: ConfidenceGate,
+        smoother: ConfidenceSmoother,
+        emitter: Emitter,
+        context: JobContext,
+    ) -> list[tuple[Track, TrackOutcome]]:
+        """Restores every track on this frame from this frame alone. D-43.
+
+        Decimates each region to its block resolution, upscales - all regions in one batch when a
+        network is in play - and blends each result with the track's previous one. No neighbouring
+        frame is consulted, so the confidence reported is the block-size prior alone: there is no
+        alignment evidence to add, and claiming any would misdescribe what happened (§7.4).
+        """
+        located: list[tuple[Track, Region, MosaicProfile, Any]] = []
+        outcomes: list[tuple[Track, TrackOutcome]] = []
+
+        for track in tracks:
+            where = self._locate_track(track, luma, anchor_history)
+            if where is None:
+                outcomes.append((track, TrackOutcome(
+                    route(RouteInputs(has_region=False)), None, 0.0, None, MosaicProfile()
+                )))
+                continue
+            located.append((track, *where))
+
+        # Everything the router needs, per track, before any pixel is touched.
+        to_restore: list[tuple[Track, Region, MosaicProfile, Any, Any, float]] = []
+        for track, region, profile, roi in located:
+            window = decide_window(
+                setting=window_setting,
+                preset=preset,
+                motion_pixels_per_frame=track.speed,
+                anchor=profile.anchor,
+                same_scene_frames=same_scene,
+                stream_frames=history_length,
+            )
+            block_penalty = float(np.clip(1.0 - (profile.block_size - 4) / 24.0, 0.0, 1.0))
+            confidence = float(np.clip(0.25 + 0.4 * block_penalty, 0.0, 1.0))
+            smoothed = smoother.update(track.track_id, confidence)
+            withheld = gate.should_withhold(track.track_id, smoothed)
+            if withheld:
+                context.regions_gated += 1
+
+            decision = route(RouteInputs(
+                has_region=True,
+                region_area=region.area,
+                min_region_area=min_region_area,
+                is_confirmed=track.is_restorable,
+                withheld_by_confidence_gate=withheld,
+                anchor=profile.anchor,
+                motion_pixels_per_frame=track.speed,
+                window=window,
+                valid_aligned_neighbours=0,
+                mean_alignment_confidence=0.0,
+                align_conf_min=align_conf_min,
+            ))
+            if decision.path is RestorationPath.PASS_THROUGH:
+                outcomes.append((track, TrackOutcome(decision, None, confidence, roi, profile)))
+                continue
+            to_restore.append((track, region, profile, roi, decision, confidence))
+
+        if not to_restore:
+            return outcomes
+
+        crops = [roi.crop(luma) for _, _, _, roi, _, _ in to_restore]
+        phases = []
+        for _, region, profile, roi, _, _ in to_restore:
+            # Grid phase is measured in frame coordinates; re-express it relative to the crop.
+            phase = profile.phase_for(region.box[0], region.box[1])
+            phases.append((
+                (phase[0] + roi.bounds[0]) % profile.block_width,
+                (phase[1] + roi.bounds[1]) % profile.block_height,
+            ))
+        specs = [profile for _, _, profile, _, _, _ in to_restore]
+
+        try:
+            if backend == "bicubic":
+                restored = [bicubic_restore(c, s, p) for c, s, p in zip(crops, specs, phases)]
+            else:
+                restored = backend.restore_many(crops, specs, phases)
+        except Exception as exc:  # noqa: BLE001 - section 5.8.2: degrade, never emit a partial composite
+            emitter.warn(E4002, f"upscaling failed on frame {frame_index}: {exc}")
+            for track, _, profile, roi, _, confidence in to_restore:
+                outcomes.append((track, TrackOutcome(
+                    route(RouteInputs(degradation_chain_exhausted=True)), None, confidence, roi, profile
+                )))
+            return outcomes
+
+        for (track, _, profile, roi, decision, confidence), pixels, crop in zip(
+            to_restore, restored, crops
+        ):
+            blended = temporal.smooth(
+                track.track_id,
+                pixels,
+                observation=crop,
+                bounds=roi.crop_bounds,
+                frame_index=frame_index,
+                same_scene=same_scene > 1,
+            )
+            # Back to the frame's coordinates, minus the alignment padding (section 5.5.3).
+            pad_left, pad_top, pad_right, pad_bottom = roi.reflect
+            trimmed = blended[
+                pad_top : blended.shape[0] - pad_bottom if pad_bottom else blended.shape[0],
+                pad_left : blended.shape[1] - pad_right if pad_right else blended.shape[1],
+            ]
+            outcomes.append((track, TrackOutcome(decision, trimmed, confidence, roi, profile)))
+
+        return outcomes
 
 
 def _encoder_for(settings: dict[str, Any]) -> str:

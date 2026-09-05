@@ -93,6 +93,13 @@ public sealed record DetectionSettings
 
     /// <summary>Frames a track survives without a detection. Default 3, range 0-15 (§5.3.4).</summary>
     public int MaxMissingFrames { get; init; } = 3;
+
+    /// <summary>
+    /// Run the detector on every Nth frame and let the tracker carry regions between. Default 1
+    /// (every frame), range 1-8 (D-43). The detector is the largest fixed cost per frame once
+    /// restoration is cheap, and mosaic regions do not appear and vanish between adjacent frames.
+    /// </summary>
+    public int DetectEvery { get; init; } = 1;
 }
 
 /// <summary>Settings that affect restoration. In the <c>restoration</c> fingerprint (prd.md §9.3).</summary>
@@ -119,6 +126,13 @@ public sealed record RestorationSettings
 
     /// <summary>Edge-aware feather width in pixels. Default 3, range 1-9 (§5.11).</summary>
     public int FeatherWidth { get; init; } = 3;
+
+    /// <summary>
+    /// Weight of the new frame in the single-frame path's temporal blend. Default 0.3 (a 7:3
+    /// blend with the previous restoration), range 0-1 (D-43). Ignored by the Quality preset,
+    /// which uses the evidence accumulator instead.
+    /// </summary>
+    public double TemporalAlpha { get; init; } = 0.3;
 }
 
 /// <summary>Settings that affect encoding. In the <c>encode</c> fingerprint (prd.md §9.3).</summary>

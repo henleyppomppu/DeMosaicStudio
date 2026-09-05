@@ -1502,3 +1502,149 @@ seam that both sides tested from their own end.
 - A one-hour source is a **67-hour job** at the shipped settings. Nothing in the product says so
   before the user starts it. Estimating up front from a probe is the obvious follow-on and is not
   done.
+
+---
+
+## D-43 — Speed first: single-frame restoration, and the four things that were actually slow
+
+**Status:** accepted (2026-08-23) · **Revises:** D-04 (third-party weights as-is) · **Gives meaning to:** `QualityPreset` (D-31 found it inert)
+
+### Context
+
+The evidence pipeline ran at **0.44 fps at 1080p** (D-42): a one-hour source was a 67-hour job. The
+user looked at the output and called the restoration a mess, and asked whether a
+decimate → single-frame super-resolution → temporal-blend → feather pipeline would do better,
+speed first.
+
+### What was actually slow
+
+Everyone's model of the cost — per-region optical flow and the solver — was wrong. Removing both
+moved the frame rate from 0.74 to 1.0. `scripts/profile_job.py` then said where a 1272 ms frame
+went:
+
+| function | ms/frame | what it was |
+| --- | ---: | --- |
+| `extract_regions → _label` | **397** | connected components as a per-pixel Python breadth-first search |
+| `detect_cuts` | **268** | all seven frame pairs re-classified every frame, full-resolution histograms |
+| detector | 209 | fifteen 512-pixel tiles of a 1080p frame — the network itself was **19.6 ms** |
+| `estimate_geometry → _best_period` | 137 | 333,000 `.mean()` calls in nested Python loops |
+| `blend_region` | 109 | dilation, box blur, two gradient calls and three `np.power` in numpy per track |
+
+None of it was the restoration. The fixes, each held to its predecessor by a test:
+
+- detector: one pass over the whole frame (it is fully convolutional; the tiles were seams plus
+  fourteen extra launches), fp16 on CUDA, uint8 uploaded and scaled on the device → **67 ms**;
+- labelling: runs, not pixels — rows cut into runs vectorised, union-find over runs → ~14 ms;
+- scene cuts: one new pair per frame, the rest carried with the buffer; histogram by `bincount`
+  on the uint8 plane → ~5 ms;
+- period search: one reshape per period, same tie-breaking, oracle test against the loop → ~2 ms;
+- blend and close: `max_pool2d` / `avg_pool2d` / element-wise on the GPU, numpy forms kept as the
+  specification → ~5 ms;
+- region extraction: areas by `bincount`, boxes by `minimum.at`, masks built inside the box.
+
+Profiled result: **1272 → 245 ms a frame** in-process before any restorer change.
+
+### The restorer
+
+Three presets, and for the first time they differ (D-31 measured Fast, Balanced and Quality
+producing identical output):
+
+| preset | restorer | what it promises |
+| --- | --- | --- |
+| Fast | decimate to block resolution, bicubic back | removes the grid, leaves blur. No model. |
+| Balanced | decimate, compact SR network on every region in one batch, temporal blend | invents plausible detail. Every pixel is a guess. Falls back to Fast with W6101 when no weights are installed. |
+| Quality | the evidence accumulator (D-28) | the only path that consults neighbouring frames. ~20× slower. |
+
+**Decimation is what makes third-party weights usable.** D-04 rejected them because they invert
+bicubic downsampling, not pixelation, and produce confidently wrong texture when handed a mosaic.
+A mosaic of block B *is* a B-times downsample; decimating first hands the network exactly the
+input it was trained on. D-04's objection stands for the mosaicked frame and does not apply to
+the decimated one. The network is `realesr-general-x4v3` (SRVGGNetCompact, 1.2 M parameters,
+BSD-3), reimplemented in thirty lines rather than imported, weights installed by
+`scripts/fetch_restorer.py` into the model store with a hash like the detector's.
+
+**CodeFormer and GFPGAN are refused**, and will stay refused however much better a face would
+look: they are face-identity priors, which §2.3 C-2 and C-4 rule out permanently, and D-11 does
+not relax C-1..C-6.
+
+### The temporal blend nearly shipped as a −5.5 dB defect
+
+On the quality fixture — a screen-fixed mosaic over a panning picture — the proposed
+unconditional 7:3 blend scored **−4.52 dB** inside the region against **+1.00 dB** for the same
+restorer with no blend. Every frame carried a ghost of the previous one. The blend is now applied
+only where the *observation* — the mosaicked crop, deterministic per frame — did not change
+between frames:
+
+| motion tolerance (luma levels) | gain | frames improved |
+| ---: | ---: | ---: |
+| unconditional | −4.52 | 5% |
+| 6.0 | +0.20 | 55% |
+| 2.0 | +0.97 | 70% |
+| **1.0** | **+1.06** | 70% |
+| 0.5 | +1.02 | 68% |
+| no blend | +1.00 | 68% |
+
+At 1.0 the blend is a small net gain; above 2 the flat parts of a moving picture blend with their
+own ghost. A face under a mosaic that follows it is unchanged block to block and blends; a pan is
+changed everywhere and does not.
+
+### scipy went in and came out again
+
+`scipy.ndimage.label` was the first fix for the labeller and is faster than the run labeller. It
+also **deadlocked every worker on its first frame**: main thread inside `create_module` loading a
+scipy extension DLL, the D-37 stdin reader thread blocked on stdin, forever. No in-process test
+showed it; every subprocess did — the bench with its minimal PATH and the C# tests with the full
+one. `faulthandler.dump_traceback_later` found it. A dependency that hangs the shipped engine
+while passing every in-process test is not one to keep for a few milliseconds; the original
+author avoided it and was right.
+
+The investigation also found that `WorkerProcessEngine` redirected stderr and never read it.
+That is a deadlock of its own class — x265 alone prints twenty lines per encode into a 4 KB pipe —
+and is fixed regardless: stderr is drained and forwarded as log lines.
+
+### Quality, measured
+
+Same clip through both restorers after the changes (`test_endtoend_quality.py`, now parametrised
+over both):
+
+| restorer | gain inside the region | frames improved | outside |
+| --- | ---: | ---: | ---: |
+| Quality (evidence) | **+4.72 dB** | 100% | 48.2 dB |
+| Fast (single-frame floor, blend at 1.0) | **+1.06 dB** | 70% | 41.6 dB |
+
+The evidence path went from the +2.8 dB this file used to quote to +4.72: the single-pass detector
+has no seams, and seams were in the masks. Balanced is not in this table — its weights are not in
+the repository and PSNR is the wrong instrument for an inventing restorer (D-36's LPIPS is the
+right one, and the measurement is still to be made by eye).
+
+### Throughput, measured
+
+`scripts/bench_throughput.py`, the real worker over stdio, 1080p, nothing else on the GPU:
+
+| preset | detectEvery | fps | vs. D-42's 0.44 |
+| --- | ---: | ---: | ---: |
+| Fast | 1 | **4.25** | 9.7× |
+| Fast | 2 | **5.70** | 13× |
+| Balanced (no weights installed → Fast) | 1 | 4.28 | 9.7× |
+| Quality (evidence) | 1 | 1.64 | 3.7× |
+
+A one-hour source: 67 hours this morning, **4.4 hours** on Fast at every frame, 3.3 with the
+detector on every second frame. Quality's 3.7× came entirely from the shared fixes — it does
+exactly what it did before, on the same masks minus their seams.
+
+### Settings and protocol
+
+Protocol 1.2. `detection.detectEvery` runs the detector on every Nth frame with the tracker
+coasting between (`Tracker.coast`, which does not count a skipped frame as a miss);
+`restoration.temporalAlpha` is the blend weight. Both change the output and are in the settings
+fingerprint, which invalidated every cached artifact once — the price of a fingerprinted key, paid
+knowingly. The parity fixture was regenerated from the Python side and the C# side holds to it.
+
+### Consequences
+
+- §6.1's ≥4 fps target at 1080p is met by the Fast path on the real stdio channel and by Balanced
+  once weights are installed; Quality remains below it.
+- The default preset is Balanced, which without weights *is* Fast. Nothing in the product invents
+  detail until the user runs `fetch_restorer.py`.
+- Every profile number above is one clip on one machine. `scripts/profile_job.py` and
+  `scripts/bench_throughput.py` are how the next claim gets checked.

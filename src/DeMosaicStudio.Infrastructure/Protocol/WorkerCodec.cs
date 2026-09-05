@@ -233,6 +233,7 @@ public static class WorkerCodec
             ["minRegionArea"] = settings.Detection.MinRegionArea,
             ["minConfirmFrames"] = settings.Detection.MinConfirmFrames,
             ["maxMissingFrames"] = settings.Detection.MaxMissingFrames,
+            ["detectEvery"] = settings.Detection.DetectEvery,
         },
         ["restoration"] = new JsonObject
         {
@@ -243,6 +244,7 @@ public static class WorkerCodec
             ["alignConfMin"] = settings.Restoration.AlignConfMin,
             ["minRestorationConfidence"] = settings.Restoration.MinRestorationConfidence,
             ["featherWidth"] = settings.Restoration.FeatherWidth,
+            ["temporalAlpha"] = settings.Restoration.TemporalAlpha,
         },
         ["encode"] = new JsonObject
         {

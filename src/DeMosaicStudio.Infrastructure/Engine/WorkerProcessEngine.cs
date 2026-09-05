@@ -104,6 +104,21 @@ public sealed class WorkerProcessEngine : IRestorationEngine, IAsyncDisposable, 
 
         _stdin = _process.StandardInput;
 
+        // **stderr must be drained, always.** It is redirected so a traceback never reaches the
+        // user's console, but a redirected pipe that nobody reads fills at 4 KB and the worker
+        // blocks on its next write - mid-job, with nothing on the protocol channel to say why -
+        // while this side waits for a `result` that will never come. x265 alone prints twenty
+        // lines per encode. Lines are forwarded as log entries so a worker that dies with a
+        // traceback still leaves it somewhere.
+        _process.ErrorDataReceived += (_, args) =>
+        {
+            if (args.Data is { } line)
+            {
+                Logged?.Invoke("stderr", line);
+            }
+        };
+        _process.BeginErrorReadLine();
+
         var ready = await ExchangeAsync(
             WorkerCodec.Hello(NextId(), _hostVersion),
             message => message.Type is "ready" or "error",

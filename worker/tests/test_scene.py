@@ -175,3 +175,14 @@ def test_same_scene_span_is_bounded_by_the_radius() -> None:
     start, end = same_scene_span(changes, target=6, radius=2, total_frames=12)
 
     assert (start, end) == (4, 8)
+
+
+def test_the_bincount_histogram_is_np_histogram_exactly() -> None:
+    """Integer luma, 32 bins over [0, 256): value // 8. Must agree to the count."""
+    from demosaic_worker.scene.cuts import HISTOGRAM_BINS, _histogram
+
+    rng = np.random.default_rng(2)
+    frame = rng.integers(0, 256, (120, 160)).astype(np.float64)
+    reference, _ = np.histogram(frame, bins=HISTOGRAM_BINS, range=(0, 256))
+
+    np.testing.assert_allclose(_histogram(frame), reference / reference.sum())

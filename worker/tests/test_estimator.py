@@ -159,3 +159,56 @@ def test_noisy_phase_estimates_lower_the_confidence() -> None:
     _, noisy_confidence = estimate_anchor(noisy, (8, 8))
 
     assert clean_confidence > noisy_confidence
+
+
+def _best_period_reference(comb: np.ndarray) -> tuple[int, int, float]:
+    """The loop the vectorised search replaced, kept as the oracle. D-43."""
+    from demosaic_worker.analyze.estimator import MAX_BLOCK, MIN_BLOCK
+
+    length = len(comb)
+    if length < MIN_BLOCK * 2:
+        return 0, 0, 1.0
+    if float(comb.mean()) <= 1e-9:
+        return 0, 0, 1.0
+
+    best = (0, 0, 1.0)
+    for period in range(MIN_BLOCK, min(MAX_BLOCK, length // 2) + 1):
+        for offset in range(period):
+            positions = np.arange(offset, length, period)
+            if len(positions) < 2:
+                continue
+            on = float(comb[positions].mean())
+            mask = np.ones(length, dtype=bool)
+            mask[positions] = False
+            off = float(comb[mask].mean()) if mask.any() else 0.0
+            contrast = on / off if off > 1e-9 else (on / 1e-9 if on > 0 else 1.0)
+            if contrast > best[2]:
+                best = (period, offset, contrast)
+    return best
+
+
+@pytest.mark.parametrize("seed", range(12))
+@pytest.mark.parametrize("length", [17, 31, 64, 97, 200])
+def test_the_vectorised_period_search_matches_the_loop_exactly(seed: int, length: int) -> None:
+    """Same period, same offset, same contrast - including which offset wins a tie."""
+    from demosaic_worker.analyze.estimator import _best_period
+
+    rng = np.random.default_rng(seed)
+    comb = rng.random(length) * 10.0
+    # Plant a real grid on half the seeds so the search has something to find.
+    if seed % 2:
+        period = int(rng.integers(4, 17))
+        comb[int(rng.integers(0, period))::period] += 40.0
+
+    reference = _best_period_reference(comb)
+    fast = _best_period(comb)
+
+    assert fast[:2] == reference[:2]
+    assert fast[2] == pytest.approx(reference[2], rel=1e-9)
+
+
+def test_the_vectorised_period_search_on_a_flat_comb() -> None:
+    from demosaic_worker.analyze.estimator import _best_period
+
+    assert _best_period(np.zeros(64)) == (0, 0, 1.0)
+    assert _best_period(np.ones(5)) == (0, 0, 1.0)

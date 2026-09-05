@@ -280,6 +280,25 @@ class Tracker:
         self.tracks = [t for t in self.tracks if t.state is not TrackState.TERMINATED]
         return list(self.tracks)
 
+    def coast(self) -> list[Track]:
+        """Advances one frame *without* a detection pass, keeping every track where its motion
+        model puts it. For frames the detector skipped (``detectEvery`` > 1).
+
+        Not :meth:`update` with an empty list: that would count every track as missed, and with
+        ``maxMissingFrames`` at its default of 3 a detector running every other frame would lose
+        a genuinely occluded region twice as fast as one running every frame. A skipped frame is
+        not a miss; nobody looked.
+        """
+        for track in self.tracks:
+            track.filter.predict()
+            track.age += 1
+            if track.region is not None:
+                # Keep the mask; move the box with the prediction so the crop follows the region.
+                predicted = tuple(int(round(v)) for v in track.filter.box)
+                track.region = Region(track.region.mask, predicted, track.region.area,
+                                      track.region.confidence)
+        return list(self.tracks)
+
     @property
     def restorable(self) -> list[Track]:
         """Tracks whose regions may be restored on the current frame."""

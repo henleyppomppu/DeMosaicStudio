@@ -59,6 +59,14 @@ Every message:
 Changing the protocol follows `AGENTS.md`: bump the version → change both sides → update this file
 → add a round-trip test against `fixtures/protocol/`.
 
+### History
+
+| version | change |
+| --- | --- |
+| 1.0 | first specification |
+| 1.1 | `stderr` no longer carries protocol; `probeResult` gains `hardware` |
+| 1.2 | two `settings` keys and a meaning for `preset` (D-43): `detection.detectEvery` (int, default 1) runs the detector on every Nth frame with the tracker carrying regions between; `restoration.temporalAlpha` (number, default 0.3) is the new-frame weight of the single-frame path's temporal blend. `restoration.preset` now selects the restorer — `Fast` decimate + bicubic, `Balanced` decimate + compact super-resolution network + temporal blend (falls back to `Fast` with `W6101` when the network is not installed), `Quality` the evidence accumulator. Both new keys are in the settings fingerprint (§9.3), so a 1.1 host's cached detections and restorations are invalidated once |
+
 ## Messages
 
 ### Host → worker

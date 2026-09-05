@@ -112,3 +112,80 @@ def test_iou_is_between_zero_and_one_for_partial_overlap() -> None:
     b = Region(mask, (5, 5, 15, 15), 100, 0.9)
 
     assert iou(a, b) == pytest.approx(25 / 175)
+
+
+def test_run_labelling_matches_the_breadth_first_search() -> None:
+    """Both are four-connected. Labels may be numbered differently; components must not."""
+    from demosaic_worker.detect.regions import _label, _label_bfs
+
+    rng = np.random.default_rng(9)
+    mask = rng.random((60, 80)) > 0.55
+    mask[10:20, 10:20] = True
+    mask[30:32, :] = False
+
+    fast, fast_count = _label(mask)
+    slow, slow_count = _label_bfs(mask)
+
+    assert fast_count == slow_count
+    # Same partition: every pair of pixels is in the same component under one iff under the other.
+    pairs_fast = {tuple(sorted(set(fast[slow == k]))) for k in range(1, slow_count + 1)}
+    assert all(len(p) == 1 for p in pairs_fast), "a BFS component was split by the run labeller"
+    pairs_slow = {tuple(sorted(set(slow[fast == k]))) for k in range(1, fast_count + 1)}
+    assert all(len(p) == 1 for p in pairs_slow), "a run-labeller component was split by the BFS"
+
+
+def test_close_matches_the_sliced_close_including_the_frame_edge() -> None:
+    """The erosion pads with True, so a region touching the edge keeps its edge. Both forms."""
+    from demosaic_worker.detect.regions import _close, _close_slices
+
+    rng = np.random.default_rng(4)
+    mask = rng.random((40, 50)) > 0.6
+    mask[0:5, 0:5] = True        # touches the corner
+    mask[20, 20] = False         # a single-pixel hole inside a solid block
+    mask[18:23, 18:23] |= True
+    mask[20, 20] = False
+
+    np.testing.assert_array_equal(_close(mask), _close_slices(mask))
+
+
+@pytest.mark.skipif(
+    not __import__("torch").cuda.is_available(), reason="the torch path is the CUDA path"
+)
+def test_the_gpu_close_matches_the_sliced_close_exactly() -> None:
+    from demosaic_worker.detect.regions import _close_slices, _close_torch
+
+    rng = np.random.default_rng(5)
+    mask = rng.random((64, 80)) > 0.6
+    mask[0:4, 0:4] = True
+    mask[30, 40] = False
+
+    fast = _close_torch(mask)
+    assert fast is not None
+    np.testing.assert_array_equal(fast, _close_slices(mask))
+
+
+@pytest.mark.parametrize("seed", range(6))
+def test_run_labelling_on_awkward_shapes(seed: int) -> None:
+    """U shapes, diagonal-only touches (which 4-connectivity must NOT join), single pixels, edges."""
+    from demosaic_worker.detect.regions import _find_objects, _label, _label_bfs
+
+    rng = np.random.default_rng(seed)
+    mask = rng.random((37, 53)) > 0.7
+    mask[0, :] = rng.random(53) > 0.5          # top edge
+    mask[:, -1] = rng.random(37) > 0.5         # right edge
+    mask[10, 10] = True; mask[11, 11] = True   # diagonal touch only
+    mask[10, 11] = False; mask[11, 10] = False
+
+    fast, n_fast = _label(mask)
+    slow, n_slow = _label_bfs(mask)
+    assert n_fast == n_slow
+    # Same partition, both directions.
+    for k in range(1, n_slow + 1):
+        assert len(set(fast[slow == k])) == 1
+    for k in range(1, n_fast + 1):
+        assert len(set(slow[fast == k])) == 1
+
+    # Boxes agree with a brute-force nonzero per label.
+    for k, (rows, cols) in enumerate(_find_objects(fast, n_fast), start=1):
+        ys, xs = np.nonzero(fast == k)
+        assert (rows.start, rows.stop, cols.start, cols.stop) == (ys.min(), ys.max() + 1, xs.min(), xs.max() + 1)

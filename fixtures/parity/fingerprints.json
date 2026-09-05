@@ -10,7 +10,8 @@
           "minRegionArea": 256,
           "maskThreshold": 0.5,
           "minConfirmFrames": 2,
-          "maxMissingFrames": 3
+          "maxMissingFrames": 3,
+          "detectEvery": 1
         },
         "restoration": {
           "preset": "Balanced",
@@ -18,7 +19,8 @@
           "temporalWindow": "auto",
           "alignConfMin": 0.35,
           "minRestorationConfidence": 0.0,
-          "featherWidth": 3
+          "featherWidth": 3,
+          "temporalAlpha": 0.3
         },
         "encode": {
           "profile": "QualityX265",
@@ -28,12 +30,12 @@
       },
       "expected": {
         "detection": {
-          "canonical": "confidence=0.4500\nmaskThreshold=0.5000\nmaxMissingFrames=3\nminConfirmFrames=2\nminRegionArea=256\nnmsIou=0.5000",
-          "digest": "sha256:ace599dc1ac233873bddee9ea1f3ddef3719ee49c04147cdd9d72fd165e62d68"
+          "canonical": "confidence=0.4500\ndetectEvery=1\nmaskThreshold=0.5000\nmaxMissingFrames=3\nminConfirmFrames=2\nminRegionArea=256\nnmsIou=0.5000",
+          "digest": "sha256:1517d424987199e4c748c62257ffc2492314bea2fe4a1db7407b04964e1222c3"
         },
         "restoration": {
-          "canonical": "alignConfMin=0.3500\nfeatherWidth=3\nminRestorationConfidence=0.0000\npaddingRatio=0.1500\npreset=Balanced\ntemporalWindow=auto",
-          "digest": "sha256:269ca6f35cdcd012d194f2938414fe2f039107e42d539a9d3186af45749d1151"
+          "canonical": "alignConfMin=0.3500\nfeatherWidth=3\nminRestorationConfidence=0.0000\npaddingRatio=0.1500\npreset=Balanced\ntemporalAlpha=0.3000\ntemporalWindow=auto",
+          "digest": "sha256:3aad163167ed051d11e89e280d0173013c5bbbcc29d967823a333a19ede52426"
         },
         "encode": {
           "canonical": "codec=H265\nconstantQuality=18\nprofile=QualityX265",

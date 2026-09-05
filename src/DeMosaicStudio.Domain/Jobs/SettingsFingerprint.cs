@@ -72,6 +72,9 @@ public static class SettingsFingerprint
     private static IEnumerable<KeyValuePair<string, string>> DetectionFields(DetectionSettings d) =>
     [
         new("confidence", Num(d.Confidence)),
+        // How often the detector runs (D-43). Changes which frames carry detections, so it is
+        // part of what the detection artifact depends on.
+        new("detectEvery", Int(d.DetectEvery)),
         new("maskThreshold", Num(d.MaskThreshold)),
         new("maxMissingFrames", Int(d.MaxMissingFrames)),
         new("minConfirmFrames", Int(d.MinConfirmFrames)),
@@ -86,6 +89,9 @@ public static class SettingsFingerprint
         new("minRestorationConfidence", Num(r.MinRestorationConfidence)),
         new("paddingRatio", Num(r.PaddingRatio)),
         new("preset", r.Preset.ToString()),
+
+        // The single-frame path's blend weight (D-43).
+        new("temporalAlpha", Num(r.TemporalAlpha)),
 
         // The requested value, never the per-frame resolved K (prd.md §5.6.1, §9.3).
         new("temporalWindow", r.TemporalWindow.ToString()),

@@ -14,7 +14,7 @@ from enum import Enum
 from typing import Final
 
 #: The protocol version this worker speaks. prd.md §8.1.
-PROTOCOL_VERSION: Final[str] = "1.1"
+PROTOCOL_VERSION: Final[str] = "1.2"
 
 
 class HostMessage(str, Enum):

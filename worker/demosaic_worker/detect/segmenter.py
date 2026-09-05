@@ -20,6 +20,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -75,17 +76,18 @@ def _digest(path: Path) -> str:
     return hasher.hexdigest()
 
 
-def load_model_info(directory: Path) -> ModelInfo:
+def load_model_info(directory: Path, *, error_code: Any = E3001) -> ModelInfo:
     """Reads a model directory's metadata and verifies the weights hash.
 
-    A mismatch is E3001, not a warning: silently running a model whose weights are not the ones the
-    metadata describes makes every downstream number untraceable.
+    A mismatch is a numbered failure, not a warning: silently running a model whose weights are not
+    the ones the metadata describes makes every downstream number untraceable. The code is E3001
+    for the detector and E4001 for a restorer (§10.2), which is why it is a parameter.
     """
     metadata_path = directory / "metadata.json"
     weights_path = directory / "model.pt"
 
     if not metadata_path.exists() or not weights_path.exists():
-        raise WorkerError(E3001, f"incomplete model directory: {directory.name}", path=str(directory))
+        raise WorkerError(error_code, f"incomplete model directory: {directory.name}", path=str(directory))
 
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     actual = _digest(weights_path)
@@ -93,7 +95,7 @@ def load_model_info(directory: Path) -> ModelInfo:
 
     if expected and expected != actual:
         raise WorkerError(
-            E3001,
+            error_code,
             f"model weights do not match metadata for {metadata.get('id')}",
             expected=expected,
             actual=actual,
@@ -199,8 +201,13 @@ class Segmenter:
 
         padded = np.pad(luma, ((0, pad_h), (0, pad_w)), mode="reflect") if (pad_h or pad_w) else luma
 
-        tensor = torch.from_numpy(np.ascontiguousarray(padded, dtype=np.float32) / 255.0)
-        tensor = tensor[None, None].to(self.device, self.dtype)
+        # Upload whatever arrived and scale on the device. The decoder hands over a uint8 plane;
+        # converting it to float64 on the host, padding that, and converting again to float32
+        # before the upload moved 32 MB through host memory per frame for a 2 MB picture.
+        source = np.ascontiguousarray(padded)
+        if source.dtype != np.uint8:
+            source = source.astype(np.float32, copy=False)
+        tensor = torch.from_numpy(source)[None, None].to(self.device).to(self.dtype) / 255.0
 
         with torch.no_grad():
             logits = self.model(tensor)

@@ -76,9 +76,18 @@ def _luma(path: Path) -> list[np.ndarray]:
         ]
 
 
-@pytest.fixture(scope="module")
-def restored(tmp_path_factory: pytest.TempPathFactory) -> tuple[list, list, list, dict]:
-    """Builds the clip, runs the pipeline, and returns (clean, input, output, summary)."""
+@pytest.fixture(scope="module", params=["Quality", "Fast"], ids=["evidence", "single-frame"])
+def restored(
+    request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFactory
+) -> tuple[list, list, list, dict, str]:
+    """Builds the clip, runs the pipeline, and returns (clean, input, output, summary, preset).
+
+    Both restorers, because they make different promises (D-43). Quality is the evidence
+    accumulator and the bar it set - the +2.8 dB this file used to quote, +4.7 since the detector
+    stopped tiling. Fast is the single-frame floor: decimate, interpolate, blend where the picture
+    did not move. It is the default and it must at least not make the region worse.
+    """
+    preset = request.param
     if not CORPUS.exists():
         pytest.skip(f"corpus clip missing: {CORPUS}")
     if not MODEL.exists():
@@ -118,18 +127,25 @@ def restored(tmp_path_factory: pytest.TempPathFactory) -> tuple[list, list, list
         output_path=str(output_path),
         settings={
             "detection": {"confidence": 0.45, "maskThreshold": 0.5, "minRegionArea": 512},
-            "restoration": {"preset": "Balanced", "temporalWindow": "auto"},
+            "restoration": {"preset": preset, "temporalWindow": "auto"},
             "encode": {"codec": "H264", "constantQuality": 14, "preset": "veryfast"},
             "modelVersion": "0.2.0",
         },
     )
     summary = JobRunner().run(context, Emitter(stream=io.StringIO()))
 
-    return _luma(clean_path), _luma(input_path), _luma(output_path), summary
+    return _luma(clean_path), _luma(input_path), _luma(output_path), summary, preset
+
+
+#: What each restorer has to clear, inside the region. The evidence path measured +4.72 dB and
+#: the single-frame floor +1.00 with no blend; the bars are well under both so a machine's
+#: encoder noise cannot fail them, and well above zero so a regression cannot pass.
+GAIN_BAR = {"Quality": 1.0, "Fast": 0.4}
+IMPROVED_BAR = {"Quality": 0.70, "Fast": 0.50}
 
 
 def _gains(restored) -> list[float]:
-    clean, degraded, output, _ = restored
+    clean, degraded, output, _, _ = restored
     mask = _region()
     count = min(len(clean), len(degraded), len(output))
     return [
@@ -139,20 +155,22 @@ def _gains(restored) -> list[float]:
 
 
 def test_the_pipeline_restores_the_mosaicked_region(restored) -> None:
-    """T-QUALITY-ENDTOEND-01. Currently +2.8 dB; the bar is a third of that."""
+    """T-QUALITY-ENDTOEND-01, per restorer. Evidence: +4.72 measured, bar 1.0. Floor: +1.00, bar 0.4."""
+    preset = restored[4]
     gains = _gains(restored)
 
-    assert float(np.mean(gains)) > 1.0, (
-        f"the pipeline gained {np.mean(gains):+.2f} dB inside the region; it used to gain +2.8"
+    assert float(np.mean(gains)) > GAIN_BAR[preset], (
+        f"{preset} gained {np.mean(gains):+.2f} dB inside the region"
     )
 
 
 def test_most_frames_improve(restored) -> None:
-    """A mean can be carried by a few frames. Currently 100%; the bar is 70%."""
+    """A mean can be carried by a few frames. Evidence: 100% measured, bar 70%. Floor: 68%, bar 50%."""
+    preset = restored[4]
     gains = _gains(restored)
     improved = float(np.mean([gain > 0 for gain in gains]))
 
-    assert improved > 0.70, f"only {improved:.0%} of frames improved"
+    assert improved > IMPROVED_BAR[preset], f"{preset}: only {improved:.0%} of frames improved"
 
 
 def test_it_leaves_the_rest_of_the_picture_alone(restored) -> None:
@@ -161,7 +179,7 @@ def test_it_leaves_the_rest_of_the_picture_alone(restored) -> None:
     Scored against the *input* rather than the original, so the encoder is the only thing being
     allowed for - what this measures is what the pipeline did on top of it.
     """
-    clean, degraded, output, _ = restored
+    clean, degraded, output, _, _ = restored
     mask = _region()
     outside = ~mask
 
@@ -177,7 +195,7 @@ def test_it_leaves_the_rest_of_the_picture_alone(restored) -> None:
 
 def test_the_timeline_survives(restored) -> None:
     """Section 5.1.7, through the whole pipeline rather than the media layer alone."""
-    _, degraded, output, summary = restored
+    _, degraded, output, summary, _ = restored
 
     assert len(output) == len(degraded)
     assert summary["framesSeen"] == len(degraded)
@@ -186,7 +204,7 @@ def test_the_timeline_survives(restored) -> None:
 
 def test_the_output_is_reported_as_synthetic(restored) -> None:
     """Section 1.3: where information was destroyed the result is an estimate, and the summary says so."""
-    *_, summary = restored
+    _, _, _, summary, _ = restored
 
     assert summary["framesRestored"] > 0
     assert summary["synthetic"] is True

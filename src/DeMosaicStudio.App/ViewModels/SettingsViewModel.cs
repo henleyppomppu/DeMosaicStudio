@@ -27,6 +27,8 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     private int _minRegionArea;
     private int _minConfirmFrames;
     private int _maxMissingFrames;
+    private int _detectEvery;
+    private double _temporalAlpha;
     private QualityPreset _preset;
     private string _temporalWindow = "auto";
     private double _alignConfMin;
@@ -101,6 +103,20 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     {
         get => _maxMissingFrames;
         set => Set(ref _maxMissingFrames, value);
+    }
+
+    /// <summary>Detector cadence in frames (D-43).</summary>
+    public int DetectEvery
+    {
+        get => _detectEvery;
+        set => Set(ref _detectEvery, value);
+    }
+
+    /// <summary>Temporal blend weight of the single-frame path (D-43).</summary>
+    public double TemporalAlpha
+    {
+        get => _temporalAlpha;
+        set => Set(ref _temporalAlpha, value);
     }
 
     /// <summary>Quality preset (§15).</summary>
@@ -183,6 +199,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             MinRegionArea = MinRegionArea,
             MinConfirmFrames = MinConfirmFrames,
             MaxMissingFrames = MaxMissingFrames,
+            DetectEvery = DetectEvery,
         },
         Restoration = _original.Restoration with
         {
@@ -195,6 +212,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             AlignConfMin = AlignConfMin,
             MinRestorationConfidence = MinRestorationConfidence,
             FeatherWidth = FeatherWidth,
+            TemporalAlpha = TemporalAlpha,
         },
         Encode = _original.Encode with
         {
@@ -211,12 +229,14 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         MinRegionArea = settings.Detection.MinRegionArea;
         MinConfirmFrames = settings.Detection.MinConfirmFrames;
         MaxMissingFrames = settings.Detection.MaxMissingFrames;
+        DetectEvery = settings.Detection.DetectEvery;
 
         Preset = settings.Restoration.Preset;
         TemporalWindow = settings.Restoration.TemporalWindow.ToString();
         AlignConfMin = settings.Restoration.AlignConfMin;
         MinRestorationConfidence = settings.Restoration.MinRestorationConfidence;
         FeatherWidth = settings.Restoration.FeatherWidth;
+        TemporalAlpha = settings.Restoration.TemporalAlpha;
 
         Profile = settings.Encode.Profile;
         Codec = settings.Encode.Codec;

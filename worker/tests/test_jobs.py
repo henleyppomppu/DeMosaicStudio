@@ -423,8 +423,17 @@ def test_progress_carries_a_rate_and_an_estimate(
     assert all(report["eta"] is not None and report["eta"] >= 0 for report in moving), (
         "the fixture reports a duration, so every estimate should be a number"
     )
-    # It shrinks: an estimate that does not is not an estimate.
-    assert moving[-1]["eta"] < moving[0]["eta"]
+    # The estimate is what it claims to be: frames left at the current rate. (Not "it shrinks" -
+    # the rate is re-measured every frame and the first few frames, before any region is found,
+    # run faster than the rest, so a short clip's estimate can legitimately grow.)
+    import av
+
+    with av.open(str(SOURCE)) as container:
+        stream = container.streams.video[0]
+        total = int(float(container.duration) / 1e6 * float(stream.average_rate))
+    for report in moving:
+        remaining = (1.0 - report["fraction"]) * total
+        assert report["eta"] == pytest.approx(remaining / report["fps"], rel=0.05, abs=0.5)
 
 
 def test_an_unknown_source_length_gives_a_rate_but_no_estimate(

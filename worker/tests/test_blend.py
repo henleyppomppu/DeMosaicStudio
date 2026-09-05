@@ -201,3 +201,37 @@ def test_blend_region_actually_changes_the_region() -> None:
     out = blend_region(frame, restored, mask, block_size=8)
 
     assert out[32, 32] > frame[32, 32] + 10
+
+
+def test_dilation_matches_the_sliced_dilation() -> None:
+    from demosaic_worker.post.blend import _dilate_slices, dilate
+
+    rng = np.random.default_rng(8)
+    mask = rng.random((30, 45)) > 0.8
+    for radius in (0, 1, 3, 6):
+        np.testing.assert_array_equal(dilate(mask, radius), _dilate_slices(mask, radius))
+
+
+@pytest.mark.skipif(
+    not __import__("torch").cuda.is_available(), reason="the torch path is the CUDA path"
+)
+def test_the_gpu_blend_matches_the_numpy_blend() -> None:
+    """The numpy functions are the specification; the pooling form must reproduce them."""
+    from demosaic_worker.post.blend import (
+        _blend_region_torch, composite, dilate, dilation_for, feather,
+    )
+
+    rng = np.random.default_rng(11)
+    frame = rng.random((70, 90)) * 255.0
+    restored = rng.random((70, 90)) * 255.0
+    mask = np.zeros((70, 90), dtype=bool)
+    mask[20:50, 30:70] = True
+    mask[0:6, 0:9] = True  # touches the corner, so the padding rules are exercised
+
+    for block_size, feather_px in ((8, 3), (16, 1), (4, 9)):
+        alpha = feather(dilate(mask, dilation_for(block_size)), frame, feather_px)
+        reference = composite(frame, restored, alpha)
+        fast = _blend_region_torch(frame, restored, mask, block_size=block_size,
+                                   feather_px=feather_px, temporal=None, track_id=None)
+        assert fast is not None
+        np.testing.assert_allclose(fast, reference, atol=0.05)

@@ -1,17 +1,17 @@
 {
   "description": "The conversation every host has with every worker, before any job exists. Model weights are gitignored, so this covers exactly the part that runs anywhere.",
-  "protocolVersion": "1.1",
+  "protocolVersion": "1.2",
   "exchange": [
     {
-      "send": {"v": "1.1", "type": "hello", "id": "1", "hostVersion": "fixture"},
+      "send": {"v": "1.2", "type": "hello", "id": "1", "hostVersion": "fixture"},
       "expect": {"type": "ready", "fields": ["workerVersion", "protocolVersion", "capabilities"]}
     },
     {
-      "send": {"v": "1.1", "type": "probe", "id": "2", "sourcePath": "fixtures/media/cfr_30fps.mp4"},
+      "send": {"v": "1.2", "type": "probe", "id": "2", "sourcePath": "fixtures/media/cfr_30fps.mp4"},
       "expect": {"type": "probeResult", "fields": ["media"]}
     },
     {
-      "send": {"v": "1.1", "type": "shutdown", "id": "3"},
+      "send": {"v": "1.2", "type": "shutdown", "id": "3"},
       "expect": null
     }
   ]

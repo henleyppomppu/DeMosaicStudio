@@ -43,6 +43,9 @@ public static class SettingsBounds
     /// <summary>Frames a track survives without a detection (section 5.3.4).</summary>
     public static Bound MaxMissingFrames { get; } = new(0, 15, 3);
 
+    /// <summary>Detector cadence in frames (D-43). Above 8 a new region is found too late to matter.</summary>
+    public static Bound DetectEvery { get; } = new(1, 8, 1);
+
     /// <summary>ROI padding ratio (section 5.5.1).</summary>
     public static Bound PaddingRatio { get; } = new(0.10, 0.20, 0.15);
 
@@ -54,6 +57,9 @@ public static class SettingsBounds
 
     /// <summary>Edge-aware feather width in pixels (section 5.11).</summary>
     public static Bound FeatherWidth { get; } = new(1, 9, 3);
+
+    /// <summary>Temporal blend weight of the single-frame path (D-43). 1 is no blending.</summary>
+    public static Bound TemporalAlpha { get; } = new(0.0, 1.0, 0.3);
 
     /// <summary>Constant-quality target.</summary>
     public static Bound ConstantQuality { get; } = new(0, 51, 18);
@@ -77,6 +83,7 @@ public static class SettingsBounds
                 MinRegionArea = MinRegionArea.ClampInt(settings.Detection.MinRegionArea),
                 MinConfirmFrames = MinConfirmFrames.ClampInt(settings.Detection.MinConfirmFrames),
                 MaxMissingFrames = MaxMissingFrames.ClampInt(settings.Detection.MaxMissingFrames),
+                DetectEvery = DetectEvery.ClampInt(settings.Detection.DetectEvery),
             },
             Restoration = settings.Restoration with
             {
@@ -85,6 +92,7 @@ public static class SettingsBounds
                 MinRestorationConfidence =
                     MinRestorationConfidence.Clamp(settings.Restoration.MinRestorationConfidence),
                 FeatherWidth = FeatherWidth.ClampInt(settings.Restoration.FeatherWidth),
+                TemporalAlpha = TemporalAlpha.Clamp(settings.Restoration.TemporalAlpha),
             },
             Encode = settings.Encode with
             {

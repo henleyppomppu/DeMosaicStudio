@@ -62,10 +62,10 @@ def main(argv: list[str] | None = None) -> int:
     assert process.stdin and process.stdout
 
     def send(**message: object) -> None:
-        process.stdin.write(json.dumps({"v": "1.1", "id": "bench", **message}) + "\n")
+        process.stdin.write(json.dumps({"v": "1.2", "id": "bench", **message}) + "\n")
         process.stdin.flush()
 
-    send(type="hello", hostVersion="1.0", protocolVersion="1.1")
+    send(type="hello", hostVersion="1.0", protocolVersion="1.2")
     send(type="process", jobId="bench", sourcePath=str(args.clip), outputPath=str(output),
          settings={
              "detection": {"confidence": 0.45, "maskThreshold": args.mask,

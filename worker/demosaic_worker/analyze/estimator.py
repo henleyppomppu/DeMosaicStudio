@@ -57,21 +57,40 @@ def _best_period(comb: np.ndarray) -> tuple[int, int, float]:
         return 0, 0, 1.0
 
     best = (0, 0, 1.0)
+    comb = comb.astype(np.float64)
+    grand = float(comb.sum())
 
+    # One reshape per period instead of one slice per (period, offset). Padding the comb to a
+    # multiple of the period and summing columns gives every offset's on-boundary sum at once;
+    # the off-boundary sum is the remainder. Profiled at 137 ms a frame as nested Python loops
+    # (333,000 `.mean()` calls over 21 frames) - this is the same arithmetic in thirty reshapes.
+    #
+    # Tie-breaking is preserved exactly: periods ascend, `argmax` returns the first offset that
+    # reaches the period's maximum, and only a strict improvement replaces `best`.
     for period in range(MIN_BLOCK, min(MAX_BLOCK, length // 2) + 1):
-        for offset in range(period):
-            positions = np.arange(offset, length, period)
-            if len(positions) < 2:
-                continue
+        rows = -(-length // period)
+        padded = np.zeros(rows * period, dtype=np.float64)
+        padded[:length] = comb
+        grid = padded.reshape(rows, period)
 
-            on = float(comb[positions].mean())
-            mask = np.ones(length, dtype=bool)
-            mask[positions] = False
-            off = float(comb[mask].mean()) if mask.any() else 0.0
+        on_sum = grid.sum(axis=0)
+        on_count = np.full(period, rows, dtype=np.int64)
+        short = length - (rows - 1) * period      # offsets >= short have one row fewer
+        on_count[short:] -= 1
 
-            contrast = on / off if off > 1e-9 else (on / 1e-9 if on > 0 else 1.0)
-            if contrast > best[2]:
-                best = (period, offset, contrast)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            on = on_sum / on_count
+            off_count = length - on_count
+            off = np.where(off_count > 0, (grand - on_sum) / np.maximum(off_count, 1), 0.0)
+            contrast = np.where(
+                off > 1e-9, on / np.where(off > 1e-9, off, 1.0),
+                np.where(on > 0, on / 1e-9, 1.0),
+            )
+
+        contrast = np.where(on_count >= 2, contrast, -np.inf)
+        offset = int(np.argmax(contrast))
+        if contrast[offset] > best[2]:
+            best = (period, offset, float(contrast[offset]))
 
     return best
 
